@@ -1,1 +1,31 @@
+
+# Dependencies
 node_modules/
+**/node_modules/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Build output
+dist/
+**/dist/
+coverage/
+**/coverage/
+.next/
+**/.next/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Local tooling and OS files
+.DS_Store
+Thumbs.db
+.vscode/
+
+.pnpm-store/
+.pnpm-workspace-state-v1.json
