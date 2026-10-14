@@ -1,0 +1,6 @@
+allowBuilds:
+  '@prisma/engines': false
+  argon2: false
+  core-js: false
+  msgpackr-extract: false
+  prisma: false
