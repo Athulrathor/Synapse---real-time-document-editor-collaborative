@@ -53,7 +53,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   async expire(key: string, ttlSeconds: number): Promise<void> {
-    await this.redis.expire(key, ttlSeconds);
+    await this.redis.expire(key, ttlSeconds + 60);
   }
 
   async getTtl(key: string): Promise<number> {
@@ -366,4 +366,122 @@ return count
   async deleteEmailVerification(tokenHash: string): Promise<void> {
     await this.delete(`auth:email-verification:${tokenHash}`);
   }
+
+  async getCache<T>(key: string): Promise<T | null> {
+    const value = await this.redis.get(key);
+
+    if (value === null) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(value) as T;
+    } catch {
+      // Remove corrupted JSON so it doesn't cause repeated failures.
+      await this.redis.del(key);
+      return null;
+    }
+  }
+
+  async setCache<T>(key: string, value: T, ttlSeconds = 60): Promise<void> {
+    if (!Number.isInteger(ttlSeconds) || ttlSeconds <= 0) {
+      throw new Error('TTL must be a positive integer.');
+    }
+
+    let serializedValue: string | undefined;
+
+    try {
+      serializedValue = JSON.stringify(value);
+    } catch {
+      throw new Error('Cache value could not be serialized to JSON.');
+    }
+
+    if (serializedValue === undefined) {
+      throw new Error('Cache value could not be serialized to JSON.');
+    }
+
+    await this.redis.set(key, serializedValue, 'EX', ttlSeconds);
+  }
+
+  async deleteCache(key: string): Promise<void> {
+    await this.redis.del(key);
+  }
+
+  async remember<T>(
+    key: string,
+    ttlSeconds: number,
+    fetchData: () => Promise<T>,
+    trackingKey?: string,
+  ): Promise<T> {
+    const cachedValue = await this.getCache<T>(key);
+
+    if (cachedValue !== null) {
+      return cachedValue;
+    }
+
+    const freshValue = await fetchData();
+
+    if (freshValue !== null && freshValue !== undefined) {
+      if (trackingKey) {
+        await this.trackCacheKey(trackingKey, key, ttlSeconds);
+      }
+
+      await this.setCache(key, freshValue, ttlSeconds);
+    }
+
+    return freshValue;
+  }
+
+  async trackCacheKey(
+    trackingKey: string,
+    cacheKey: string,
+    ttlSeconds = 60,
+  ): Promise<void> {
+    if (!Number.isInteger(ttlSeconds) || ttlSeconds <= 0) {
+      throw new Error('TTL must be a positive integer.');
+    }
+
+    await this.redis.sadd(trackingKey, cacheKey);
+    await this.redis.expire(trackingKey, ttlSeconds + 60);
+  }
+
+  async invalidateTrackedCache(trackingKey: string): Promise<void> {
+    const cacheKeys = await this.redis.smembers(trackingKey);
+
+    const pipeline = this.redis.pipeline();
+
+    for (const cacheKey of cacheKeys) {
+      pipeline.del(cacheKey);
+    }
+
+    pipeline.del(trackingKey);
+
+    await pipeline.exec();
+  }
+
+  async updateJsonAtomically<T>(
+    key: string,
+    script: string,
+    args: string[],
+  ): Promise<T | null> {
+    const result = await this.redis.eval(script, 1, key, ...args);
+
+    if (result === null || result === undefined) {
+      return null;
+    }
+
+    if (typeof result === 'string') {
+      try {
+        return JSON.parse(result) as T;
+      } catch {
+        throw new Error('Redis returned invalid JSON.');
+      }
+    }
+
+    throw new Error('Redis script returned an unexpected result.');
+  }
+
+  // async incrementCacheVersion(key: string): Promise<number> {
+  //   return this.redis.incr(key);
+  // }
 }

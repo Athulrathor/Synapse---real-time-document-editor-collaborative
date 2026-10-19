@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-// import { createObserveModule } from '@nestjs/observe';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { DatabaseModule } from './database/database.module.js';
@@ -9,7 +8,6 @@ import configuration from './config/configuration.js';
 import { envValidationSchema } from './config/env.validation.js';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
-import type { DynamicModule } from '@nestjs/common';
 import { AuthModule } from './auth/auth.module.js';
 import { UsersModule } from './users/users.module.js';
 import { EmailModule } from './common/email/email.module.js';
@@ -21,6 +19,10 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { OutboxModule } from './jobs/outbox/outbox.module.js';
 import { ImageKitModule } from './common/imagekit/imagekit.module.js';
 import { WorkspacesModule } from './workspaces/workspaces.module.js';
+import { DocumentsModule } from './documents/documents.module.js';
+import { CollaborationModule } from './collaboration/collaboration.module.js';
+import { NotificationModule } from './notification/notification.module.js';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 
 // export const {
 //   ObserveModule,
@@ -37,6 +39,7 @@ import { WorkspacesModule } from './workspaces/workspaces.module.js';
     //   appSecret: 'YOUR_APP_SECRET',
     //   serviceId: 'api',
     // }),
+    EventEmitterModule.forRoot(),
     ScheduleModule.forRoot(),
     DatabaseModule,
     HealthModule,
@@ -60,7 +63,10 @@ import { WorkspacesModule } from './workspaces/workspaces.module.js';
     JobsModule,
     OutboxModule,
     ImageKitModule,
-    WorkspacesModule
+    WorkspacesModule,
+    DocumentsModule,
+    CollaborationModule,
+    NotificationModule
   ],
   controllers: [AppController],
   providers: [

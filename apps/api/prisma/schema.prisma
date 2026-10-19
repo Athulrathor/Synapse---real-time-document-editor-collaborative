@@ -34,6 +34,22 @@ enum OutboxEventStatus {
   FAILED
 }
 
+enum NotificationResourceType {
+  DOCUMENT
+  WORKSPACE
+  COMMENT
+}
+
+enum NotificationType {
+  DOCUMENT_CREATED
+  DOCUMENT_SHARED
+  DOCUMENT_MENTION
+  COMMENT_ADDED
+  COMMENT_REPLY
+  WORKSPACE_INVITATION
+  WORKSPACE_ROLE_CHANGED
+}
+
 model User {
   id    String @id @default(uuid())
   email String @unique
@@ -44,11 +60,14 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  auth             UserAuth?
-  avatar           Avatar?
-  googleAccount    GoogleAccount?
-  workspaceMembers WorkspaceMember[]
-  documents        Document[] @relation("DocumentCreator")
+  auth                  UserAuth?
+  avatar                Avatar?
+  googleAccount         GoogleAccount?
+  workspaceMembers      WorkspaceMember[]
+  documents             Document[]        @relation("DocumentCreator")
+  createdVersions       Version[]
+  notificationsReceived Notification[]    @relation("NotificationRecipient")
+  notificationsActed    Notification[]    @relation("NotificationActor")
 }
 
 model Avatar {
@@ -154,9 +173,48 @@ model Document {
   updatedAt   DateTime       @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
- 
-  createdBy User   @relation("DocumentCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  createdBy User      @relation("DocumentCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  versions  Version[]
 
   @@index([workspaceId, status, updatedAt])
   @@index([createdById])
+}
+
+model Version {
+  id            String   @id @default(uuid())
+  documentId    String
+  versionNumber Int
+  snapshot      Bytes
+  createdById   String
+  message       String?
+  createdAt     DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  creator  User     @relation(fields: [createdById], references: [id])
+
+  @@unique([documentId, versionNumber])
+  @@index([documentId, createdAt])
+}
+
+model Notification {
+  id           String                    @id @default(uuid())
+  recipientId  String
+  actorId      String?
+  type         NotificationType
+  title        String
+  message      String
+  resourceType NotificationResourceType?
+  resourceId   String?
+  dedupeKey    String?                   @unique
+  isRead       Boolean                   @default(false)
+  readAt       DateTime?
+  createdAt    DateTime                  @default(now())
+
+  recipient User  @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  actor     User? @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([recipientId, isRead, createdAt])
+  @@index([recipientId, createdAt])
+  @@index([resourceType, resourceId])
 }

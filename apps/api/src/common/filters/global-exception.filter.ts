@@ -44,8 +44,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         message =
           typeof errorResponse.error.message === 'string'
             ? errorResponse.error.message
-            : Array.isArray(errorResponse.message)
-              ? errorResponse.error.message.join(', ')
+            : Array.isArray(errorResponse.error.message)
+              ? errorResponse.error.message.length <= 1 ? errorResponse.error.message[0] : JSON.stringify(errorResponse.error.message)
               : errorResponse.error.message;
         if (
           errorResponse.error &&
@@ -54,6 +54,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         ) {
           details = (errorResponse.error as { details?: unknown }).details;
         }
+        console.log(errorResponse)
       }
     } else if (exception instanceof Error) {
       this.logger.error(

@@ -198,15 +198,6 @@ export class SessionRepository {
     return true;
   }
 
-  // async incrementTokenVersion(userId: string): Promise<number> {
-  //   const key = this.tokenVersionKey(userId);
-
-  //   // Ensure the key exists before incrementing.
-  //   await this.redisService.setIfAbsentPersistent(key, '0');
-
-  //   return this.redisService.increment(key);
-  // }
-
   async revokeSession(sessionId: string): Promise<void> {
     await this.redisService.delete(this.sessionKey(sessionId));
   }

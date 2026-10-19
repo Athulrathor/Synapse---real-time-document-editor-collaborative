@@ -5,7 +5,6 @@ import { ConfigService } from '@nestjs/config';
 import { EmailModule } from '../common/email/email.module.js';
 import { EmailProcessor } from './email/email.processor.js';
 import { EmailQueue } from './email/email.queue.js';
-import { OutboxModule } from './outbox/outbox.module.js';
 import { EncryptionService } from '../common/crypto/encryption.service.js';
 
 @Module({
@@ -39,6 +38,6 @@ import { EncryptionService } from '../common/crypto/encryption.service.js';
   ],
 
   providers: [EmailProcessor,EmailQueue,EncryptionService],
-  exports: [BullModule,EmailProcessor],
+  exports: [BullModule,EmailProcessor,EmailQueue],
 })
 export class JobsModule {}

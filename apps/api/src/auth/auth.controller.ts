@@ -41,6 +41,7 @@ import { EmailQueue } from '../jobs/email/email.queue.js';
 import { AuthGuard } from '@nestjs/passport';
 import type { GoogleUserProfile } from './strategies/google.strategy.js';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { ResponseMessage } from '../common/decorators/response-message.decorator.js';
 
 @Controller('auth')
 export class AuthController {
@@ -51,6 +52,7 @@ export class AuthController {
 
   @Post('register')
   @UseInterceptors(FileInterceptor('avatar'))
+  @ResponseMessage('Account registered successfully. Please verify your email')
   register(
     @Body() dto: RegisterDto,
     @UploadedFile(
@@ -72,11 +74,13 @@ export class AuthController {
   }
 
   @Post('verify/email')
+  @ResponseMessage('Email verified successfully.')
   verifyEmail(@Body() dto: VerifyEmailDto) {
     return this.authService.verifyEmail(dto);
   }
 
   @Post('login')
+  @ResponseMessage('Login successful.')
   async login(
     @Body() dto: { email: string; password: string },
     @Res({ passthrough: true }) res: Response,
@@ -117,14 +121,6 @@ export class AuthController {
       });
     }
 
-    // res.cookie('access_token', result.accessToken, {
-    //   httpOnly: true,
-    //   secure: process.env.NODE_ENV === 'production',
-    //   sameSite: 'lax',
-    //   maxAge: 10 * 60 * 1000,
-    //   path: '/',
-    // });
-
     res.cookie('refresh_token', result.refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -134,7 +130,6 @@ export class AuthController {
     });
 
     return {
-      success: true,
       accessToken: result?.accessToken,
       user: result?.user,
     };
@@ -142,9 +137,9 @@ export class AuthController {
 
   @Get('me')
   @UseGuards(JwtAuthGuard)
+  @ResponseMessage('User profile retrieved successfully.')
   getCurrentUser(@CurrentUser() user: AuthenticatedUser) {
     return {
-      success: true,
       user: {
         id: user.userId,
         email: user.email,
@@ -154,6 +149,7 @@ export class AuthController {
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Access token refreshed successfully.')
   async refreshTokens(
     @Body() dto: RefreshTokenDto,
     @Req() req: Request,
@@ -182,8 +178,6 @@ export class AuthController {
     });
 
     return {
-      success: result.success,
-      message: result.message,
       accessToken: result.accessToken,
     };
   }
@@ -191,6 +185,7 @@ export class AuthController {
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard)
+  @ResponseMessage('Logged out successfully.')
   async logout(
     @CurrentUser() user: AuthenticatedUser & { sessionId: string },
     @Res({ passthrough: true }) res: Response,
@@ -213,6 +208,7 @@ export class AuthController {
   @Post('logout/all')
   @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard)
+  @ResponseMessage('Logged out from all sessions successfully.')
   async logoutAll(
     @CurrentUser() user: AuthenticatedUser,
     @Res({ passthrough: true }) res: Response,
@@ -231,17 +227,20 @@ export class AuthController {
 
   @Post('forgot/password')
   @HttpCode(HttpStatus.OK)
+  @ResponseMessage('If an account exists with that email, password reset instructions will be sent.')
   forgotPassword(@Body() dto: ForgotPasswordDto) {
     return this.authService.forgetPassword(dto);
   }
 
   @Post('verify/otp')
   @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Password reset OTP verified successfully.')
   verifyPasswordResetOtp(@Body() dto: VerifyPasswordResetOtpDto) {
     return this.authService.verifyResetPasswordOtp(dto);
   }
 
   @Post('reset/password')
+  @ResponseMessage('Password reset successfully.')
   @HttpCode(HttpStatus.OK)
   resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);
@@ -249,11 +248,13 @@ export class AuthController {
 
   @Get('google')
   @UseGuards(AuthGuard('google'))
+  @ResponseMessage('Redirecting google login page.')
   googleLogin(): void {
     // Passport redirects the user to Google.
   }
 
   @Get('google/callback')
+  @ResponseMessage('Google login successful.')
   @UseGuards(AuthGuard('google'))
   async googleCallback(
     @Req() req: Request & { user: GoogleUserProfile },
@@ -299,11 +300,7 @@ export class AuthController {
       path: '/api/v1/auth',
     });
 
-    // Do not put access or refresh tokens in the redirect URL.
-    // Return the access token in the response body for the frontend.
     return res.status(HttpStatus.OK).json({
-      success: true,
-      message: 'Google login successful.',
       accessToken: result.accessToken,
       user: result.user,
     });

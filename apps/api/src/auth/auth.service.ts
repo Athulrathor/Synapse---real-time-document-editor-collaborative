@@ -31,16 +31,16 @@ import { GoogleAccountRepository } from './repositories/google-account.repositor
 import type { GoogleUserProfile } from './strategies/google.strategy.js';
 import { ImageKitService } from '../common/imagekit/imagekit.service.js';
 
-export interface RegistrationResponse {
-  success: boolean;
-  message: string;
+export interface Response {
   accessToken?: string;
-  refreshToken?: string;
+  refreshToken: string;
   user: {
     id: string;
     email: string;
     name: string;
-    avatarUrl?: string;
+    auth?: JSON;
+    avatar?: JSON;
+    google?: JSON;
     status: UserStatus;
     createdAt: Date;
   };
@@ -129,7 +129,7 @@ export class AuthService {
   async registerUser(
     dto: RegisterDto,
     avatar?: Express.Multer.File,
-  ): Promise<RegistrationResponse> {
+  ): Promise<void> {
     const { name, email, password } = dto;
 
     const normalizedEmail = email.trim().toLowerCase();
@@ -250,22 +250,12 @@ export class AuthService {
       });
     }
 
-    return {
-      success: true,
-      message: 'Verification email send to registed email address.',
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        status: user.status,
-        createdAt: user.createdAt,
-      },
-    };
+    return;
   }
 
   async verifyEmail(
     dto: VerifyEmailDto,
-  ): Promise<{ success: boolean; message: string } | null> {
+  ): Promise<void> {
     const { token } = dto;
 
     const tokenHash = await this.tokenService.hashToken(token);
@@ -322,10 +312,7 @@ export class AuthService {
       await this.userRepository.activateUser(user.id, tx);
     });
 
-    return {
-      success: true,
-      message: 'Email verified successfully.',
-    };
+    return;
   }
 
   async loginUser(
@@ -333,7 +320,7 @@ export class AuthService {
     ipAddress: string,
     userAgent: string,
     deviceName: string,
-  ): Promise<RegistrationResponse | null> {
+  ): Promise<Response | null> {
     const { email, password } = dto;
 
     const normalizedEmail = email.trim().toLowerCase();
@@ -413,21 +400,6 @@ export class AuthService {
 
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
-    // await this.prisma.$transaction(async (tx: PrismaTransaction) => {
-    //   await this.sessionRepository.create(
-    //     {
-    //       id: sessionId,
-    //       userId: user.id,
-    //       ipAddress,
-    //       userAgent,
-    //       deviceName,
-    //       refreshTokenHash,
-    //       expiresAt,
-    //     },
-    //     tx,
-    //   );
-    // });
-
     await this.sessionRepository.create({
       id: sessionId,
       userId: user.id,
@@ -441,8 +413,6 @@ export class AuthService {
     await this.authRepository.resetFailedLogins(user.id);
 
     return {
-      success: true,
-      message: 'Email verified successfully.',
       accessToken,
       refreshToken,
       user: {
@@ -460,7 +430,7 @@ export class AuthService {
     ipAddress: string,
     userAgent: string,
     deviceName: string,
-  ): Promise<RegistrationResponse> {
+  ): Promise<Response> {
     const user = await this.resolveGoogleUser(profile);
 
     const sessionId = await this.tokenService.createRandomUUID();
@@ -497,8 +467,6 @@ export class AuthService {
     });
 
     return {
-      success: true,
-      message: 'Google login successful.',
       accessToken,
       refreshToken,
       user: {
@@ -645,34 +613,26 @@ export class AuthService {
     };
   }
 
-  async logoutCurrentSession(userId: string, sessionId: string) {
+  async logoutCurrentSession(userId: string, sessionId: string): Promise<void> {
     const result = await this.sessionRepository.revokeSessionForUser(
       sessionId,
       userId,
     );
 
-    return {
-      success: true,
-      message: result
-        ? 'Logged out successfully.'
-        : 'Session was already revoked or does not exist.',
-    };
+    return;
   }
 
-  async logoutAllSessions(userId: string) {
+  async logoutAllSessions(userId: string): Promise<void> {
     await this.authRepository.incrementTokenVersion(userId);
 
     await this.sessionRepository.revokeAllUserSessions(userId);
 
-    return {
-      success: true,
-      message: 'Logged out from all devices successfully.',
-    };
+    return;
   }
 
   async forgetPassword(
     dto: ForgotPasswordDto,
-  ): Promise<{ success: boolean; message: string } | any> {
+  ): Promise<void> {
     const { email } = dto;
 
     const normalizedEmail = email.trim().toLowerCase();
@@ -680,11 +640,7 @@ export class AuthService {
     const user = await this.userRepository.findByEmailWithAuth(normalizedEmail);
 
     if (!user || user.status !== UserStatus.ACTIVE) {
-      return {
-        success: true,
-        message:
-          'If an account exists with that email, password reset instructions will be sent.',
-      };
+      return;
     }
 
     const otp = await this.tokenService.generateDigitOtp();
@@ -720,17 +676,13 @@ export class AuthService {
       });
     }
 
-    return {
-      success: true,
-      message:
-        'If an account exists with that email, password reset instructions will be sent.',
-    };
+    return;
   }
 
   async verifyResetPasswordOtp(data: {
     email: string;
     otp?: string | undefined;
-  }): Promise<{ success: boolean; message: string; resetToken: string }> {
+  }): Promise<{resetToken: string }> {
     const { email, otp } = data;
     const normalizedEmail = email.trim().toLowerCase();
 
@@ -795,18 +747,10 @@ export class AuthService {
       600,
     );
 
-    return {
-      success: true,
-      message:
-        'Otp verified successfully. You will redirected to reset password pages. Please wait...',
-      resetToken,
-    };
+    return {resetToken: resetToken};
   }
 
-  async resetPassword(dto: ResetPasswordDto): Promise<{
-    success: boolean;
-    message: string;
-  }> {
+  async resetPassword(dto: ResetPasswordDto): Promise<void> {
     const { resetToken, newPassword, confirmPassword } = dto;
 
     if (newPassword !== confirmPassword) {
@@ -830,11 +774,7 @@ export class AuthService {
       });
     }
 
-    return {
-      success: true,
-      message:
-        'Password reset successfull. Please login again with new password',
-    };
+    return;
   }
 
   async resolveGoogleUser(profile: GoogleUserProfile) {

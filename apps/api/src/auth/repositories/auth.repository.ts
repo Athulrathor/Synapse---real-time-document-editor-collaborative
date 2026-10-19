@@ -90,33 +90,33 @@ export class AuthRepository {
   }
 
   async getTokenVersion(userId: string): Promise<number> {
-  const userAuth = await this.prisma.userAuth.findUnique({
-    where: { userId },
-    select: { tokenVersion: true },
-  });
-
-  if (!userAuth) {
-    throw new Error('User authentication record not found.');
-  }
-
-  return userAuth.tokenVersion;
-}
-
-async incrementTokenVersion(userId: string): Promise<number> {
-  return this.prisma.$transaction(async (tx) => {
-    const auth = await tx.userAuth.update({
+    const userAuth = await this.prisma.userAuth.findUnique({
       where: { userId },
-      data: {
-        tokenVersion: { increment: 1 },
-      },
-      select: {
-        tokenVersion: true,
-      },
+      select: { tokenVersion: true },
     });
 
-    return auth.tokenVersion;
-  });
-}
+    if (!userAuth) {
+      throw new Error('User authentication record not found.');
+    }
+
+    return userAuth.tokenVersion;
+  }
+
+  async incrementTokenVersion(userId: string): Promise<number> {
+    return this.prisma.$transaction(async (tx) => {
+      const auth = await tx.userAuth.update({
+        where: { userId },
+        data: {
+          tokenVersion: { increment: 1 },
+        },
+        select: {
+          tokenVersion: true,
+        },
+      });
+
+      return auth.tokenVersion;
+    });
+  }
 
   async resetPasswordAndIncrementTokenVersion(
     userId: string,

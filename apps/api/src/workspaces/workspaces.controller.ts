@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { isUUID } from 'class-validator';
@@ -20,12 +21,14 @@ import { UpdateMemberRoleDto } from './dto/update-member-role.dto.js';
 
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import { WorkspaceRoleGuard } from '../common/guards/workspace-role.guard.js';
-import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { Roles } from '../common/decorators/role.decorator.js';
 import { AppException } from '../common/exceptions/app.exception.js';
+import { ResponseMessage } from '../common/decorators/response-message.decorator.js';
 
-interface AuthenticatedUser {
-  userId: string;
+interface AuthenticatedRequest extends Request {
+  user: {
+    userId: string;
+  };
 }
 
 @Controller('workspaces')
@@ -44,69 +47,80 @@ export class WorkspacesController {
   }
 
   @Post()
+  @ResponseMessage('Workspace created successfully.')
   create(
-    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: AuthenticatedRequest,
     @Body() dto: CreateWorkspaceDto,
   ) {
-    return this.workspacesService.create(user.userId, dto);
+    return this.workspacesService.create(req.user.userId, dto);
   }
 
   @Get()
-  findMine(@CurrentUser() user: AuthenticatedUser) {
-    return this.workspacesService.findMine(user.userId);
+  @ResponseMessage('Workspaces retrieved successfully.')
+  findMine(@Req() req: AuthenticatedRequest,) {
+    return this.workspacesService.findMine(req.user.userId);
   }
 
   @Get(':workspaceId')
+  @ResponseMessage('Workspace retrieved successfully.')
   findOne(
     @Param('workspaceId') workspaceId: string,
-    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: AuthenticatedRequest,
   ) {
     this.validateUuid(workspaceId, 'Workspace ID');
 
-    return this.workspacesService.findOne(workspaceId, user.userId);
+    return this.workspacesService.findOne(workspaceId, req.user.userId);
   }
 
   @Patch(':workspaceId')
+  @UseGuards(WorkspaceRoleGuard)
+  @Roles(WorkspaceRole.OWNER,WorkspaceRole.ADMIN)
+  @ResponseMessage('Workspace updated successfully.')
   update(
     @Param('workspaceId') workspaceId: string,
-    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: AuthenticatedRequest,
     @Body() dto: UpdateWorkspaceDto,
   ) {
     this.validateUuid(workspaceId, 'Workspace ID');
 
-    return this.workspacesService.update(workspaceId, user.userId, dto);
+    return this.workspacesService.update(workspaceId, req.user.userId, dto);
   }
 
   @Delete(':workspaceId')
+  @UseGuards(WorkspaceRoleGuard)
+  @Roles(WorkspaceRole.OWNER)
+  @ResponseMessage('Workspace deleted successfully.')
   remove(
     @Param('workspaceId') workspaceId: string,
-    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: AuthenticatedRequest,
   ) {
     this.validateUuid(workspaceId, 'Workspace ID');
 
-    return this.workspacesService.remove(workspaceId, user.userId);
+    return this.workspacesService.remove(workspaceId, req.user.userId);
   }
 
   @Post(':workspaceId/members')
   @UseGuards(WorkspaceRoleGuard)
   @Roles(WorkspaceRole.OWNER, WorkspaceRole.ADMIN)
+  @ResponseMessage('Workspace member added successfully.')
   addMember(
     @Param('workspaceId') workspaceId: string,
-    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: AuthenticatedRequest,
     @Body() dto: AddMemberDto,
   ) {
     this.validateUuid(workspaceId, 'Workspace ID');
 
-    return this.workspacesService.addMember(workspaceId, user.userId, dto);
+    return this.workspacesService.addMember(workspaceId, req.user.userId, dto);
   }
 
   @Patch(':workspaceId/members/:userId')
   @UseGuards(WorkspaceRoleGuard)
   @Roles(WorkspaceRole.OWNER, WorkspaceRole.ADMIN)
+  @ResponseMessage('Workspace member role updated successfully.')
   updateMemberRole(
     @Param('workspaceId') workspaceId: string,
     @Param('userId') targetUserId: string,
-    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: AuthenticatedRequest,
     @Body() dto: UpdateMemberRoleDto,
   ) {
     this.validateUuid(workspaceId, 'Workspace ID');
@@ -114,7 +128,7 @@ export class WorkspacesController {
 
     return this.workspacesService.updateMemberRole(
       workspaceId,
-      user.userId,
+      req.user.userId,
       targetUserId,
       dto,
     );
@@ -123,17 +137,18 @@ export class WorkspacesController {
   @Delete(':workspaceId/members/:userId')
   @UseGuards(WorkspaceRoleGuard)
   @Roles(WorkspaceRole.OWNER, WorkspaceRole.ADMIN)
+  @ResponseMessage('Workspace member removed successfully.')
   removeMember(
     @Param('workspaceId') workspaceId: string,
     @Param('userId') targetUserId: string,
-    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: AuthenticatedRequest,
   ) {
     this.validateUuid(workspaceId, 'Workspace ID');
     this.validateUuid(targetUserId, 'User ID');
 
     return this.workspacesService.removeMember(
       workspaceId,
-      user.userId,
+      req.user.userId,
       targetUserId,
     );
   }

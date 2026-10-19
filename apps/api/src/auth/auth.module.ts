@@ -46,6 +46,6 @@ import { JwtService } from '@nestjs/jwt';
     ImageKitService,
     JwtAuthGuard,
   ],
-  exports: [AuthService,JwtAuthGuard,SessionRepository,AuthRepository],
+  exports: [AuthService,JwtAuthGuard,SessionRepository,AuthRepository,UsersRepository],
 })
 export class AuthModule {}

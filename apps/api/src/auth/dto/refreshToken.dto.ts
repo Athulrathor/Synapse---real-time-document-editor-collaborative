@@ -40,8 +40,5 @@ export class RefreshTokenPayloadDto {
 }
 
 export class RefreshTokenResponseDto {
-  @IsBoolean() success!: boolean;
-  @IsString() @IsNotEmpty() message!: string;
   @IsString() @IsNotEmpty() accessToken!: string;
-  @IsString() @IsNotEmpty() refreshToken!: string;
 }

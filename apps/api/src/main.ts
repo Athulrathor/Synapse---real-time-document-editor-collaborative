@@ -1,11 +1,14 @@
-import { NestFactory } from '@nestjs/core';
+import { NestFactory, Reflector } from '@nestjs/core';
 import { AppModule } from './app.module.js';
 import { ConfigService } from '@nestjs/config';
 import helmet from 'helmet';
 // @ts-expect-error cookie-parser does not ship TypeScript declarations.
 import cookieParser from 'cookie-parser';
-import { ValidationPipe } from '@nestjs/common';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter.js';
+import { formatValidationErrors } from './common/filters/validation-error.formatter.js';
+import { AppException } from './common/exceptions/app.exception.js';
+import { ResponseInterceptor } from './common/interfaces/api-response.interface.js';
+import { ValidationPipe } from '@nestjs/common';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -20,11 +23,21 @@ async function bootstrap() {
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
+      exceptionFactory: (error) =>
+        new AppException({
+          code: 'VALIDATION_ERROR',
+          message: 'Request validation failed.',
+          status: 400,
+          details: formatValidationErrors(error),
+        }),
     }),
   );
 
   const configService = app.get(ConfigService);
 
+  app.useGlobalInterceptors(
+  new ResponseInterceptor(app.get(Reflector)),
+);
   app.useGlobalFilters(new GlobalExceptionFilter());
   
   app.setGlobalPrefix('api/v1');

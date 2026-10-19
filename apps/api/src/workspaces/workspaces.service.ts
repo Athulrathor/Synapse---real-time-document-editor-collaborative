@@ -10,7 +10,7 @@ import { UpdateWorkspaceDto } from './dto/update-workspace.dto.js';
 import { AppException } from '../common/exceptions/app.exception.js';
 import { AddMemberDto } from './dto/add-member.dto.js';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto.js';
-import { tryCatch } from 'bullmq';
+import { RedisService } from '../common/redis/redis.service.js';
 
 const WORKSPACE_NOT_FOUND = {
   code: 'WORKSPACE_NOT_FOUND',
@@ -26,16 +26,28 @@ const INSUFFICIENT_PERMISSIONS = {
 
 @Injectable()
 export class WorkspacesService {
-  constructor(private readonly workspacesRepository: WorkspacesRepository) {}
+  constructor(
+    private readonly workspacesRepository: WorkspacesRepository,
+    private readonly redisService: RedisService,
+  ) {}
 
   async findMine(userId: string) {
-    return this.workspacesRepository.findMine(userId);
+    const cacheKey = `workspaces:user:${userId}`;
+
+    return this.redisService.remember(cacheKey, 60, () =>
+      this.workspacesRepository.findMine(userId),
+    );
   }
 
   async findOne(workspaceId: string, userId: string) {
-    const workspace = await this.workspacesRepository.findOneForMember(
-      workspaceId,
-      userId,
+    const cacheKey = `workspace:${workspaceId}:member:${userId}`;
+    const trackingKey = `workspace:${workspaceId}:cache-keys`;
+
+    const workspace = await this.redisService.remember(
+      cacheKey,
+      60,
+      () => this.workspacesRepository.findOneForMember(workspaceId, userId),
+      trackingKey,
     );
 
     if (!workspace) {
@@ -46,10 +58,17 @@ export class WorkspacesService {
   }
 
   async create(userId: string, dto: CreateWorkspaceDto) {
-    return this.workspacesRepository.createWorkspaceWithOwner(userId, {
-      name: dto.name.trim(),
-      description: dto.description?.trim() || null,
-    });
+    const workspace = await this.workspacesRepository.createWorkspaceWithOwner(
+      userId,
+      {
+        name: dto.name.trim(),
+        description: dto.description?.trim() || null,
+      },
+    );
+
+    await this.redisService.deleteCache(`workspaces:user:${userId}`);
+
+    return workspace;
   }
 
   async update(workspaceId: string, userId: string, dto: UpdateWorkspaceDto) {
@@ -73,12 +92,29 @@ export class WorkspacesService {
       });
     }
 
-    return this.workspacesRepository.updateWorkspace(workspaceId, {
-      ...(dto.name !== undefined && { name: dto.name.trim() }),
-      ...(dto.description !== undefined && {
-        description: dto.description?.trim() || null,
-      }),
-    });
+    const updatedWorkspace = await this.workspacesRepository.updateWorkspace(
+      workspaceId,
+      {
+        ...(dto.name !== undefined && { name: dto.name.trim() }),
+        ...(dto.description !== undefined && {
+          description: dto.description?.trim() || null,
+        }),
+      },
+    );
+
+    await this.redisService.invalidateTrackedCache(
+      `workspace:${workspaceId}:cache-keys`,
+    );
+
+    const members = await this.workspacesRepository.findMemberIds(workspaceId);
+
+    await Promise.all(
+      members.map(({ userId }) =>
+        this.redisService.deleteCache(`workspaces:user:${userId}`),
+      ),
+    );
+
+    return updatedWorkspace;
   }
 
   async remove(workspaceId: string, userId: string) {
@@ -98,9 +134,21 @@ export class WorkspacesService {
       });
     }
 
+    const members = await this.workspacesRepository.findMemberIds(workspaceId);
+
     await this.workspacesRepository.deleteWorkspace(workspaceId);
 
-    return { message: 'Workspace deleted successfully.' };
+    await this.redisService.invalidateTrackedCache(
+      `workspace:${workspaceId}:cache-keys`,
+    );
+
+    await Promise.all(
+      members.map(({ userId }) =>
+        this.redisService.deleteCache(`workspaces:user:${userId}`),
+      ),
+    );
+
+    return;
   }
 
   async addMember(workspaceId: string, actorId: string, dto: AddMemberDto) {
@@ -170,7 +218,7 @@ export class WorkspacesService {
     let member = null;
 
     try {
-      member = this.workspacesRepository.createMember(
+      member = await this.workspacesRepository.createMember(
         workspaceId,
         user.id,
         role,
@@ -186,6 +234,12 @@ export class WorkspacesService {
 
       throw error;
     }
+
+    await this.redisService.invalidateTrackedCache(
+      `workspace:${workspaceId}:cache-keys`,
+    );
+
+    await this.redisService.deleteCache(`workspaces:user:${user.id}`);
 
     return member;
   }
@@ -258,11 +312,19 @@ export class WorkspacesService {
       });
     }
 
-    return this.workspacesRepository.updateMemberRole(
+    const updatedMember = await this.workspacesRepository.updateMemberRole(
       workspaceId,
       targetUserId,
       dto.role,
     );
+
+    await this.redisService.invalidateTrackedCache(
+      `workspace:${workspaceId}:cache-keys`,
+    );
+
+    await this.redisService.deleteCache(`workspaces:user:${targetUserId}`);
+
+    return updatedMember;
   }
 
   async removeMember(
@@ -320,6 +382,17 @@ export class WorkspacesService {
       });
     }
 
-    return this.workspacesRepository.deleteMember(workspaceId, targetUserId);
+    const removedMember = await this.workspacesRepository.deleteMember(
+      workspaceId,
+      targetUserId,
+    );
+
+    await this.redisService.invalidateTrackedCache(
+      `workspace:${workspaceId}:cache-keys`,
+    );
+
+    await this.redisService.deleteCache(`workspaces:user:${targetUserId}`);
+
+    return removedMember;
   }
 }

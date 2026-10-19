@@ -6,11 +6,12 @@ import { WorkspacesRepository } from './repository/workspace.repository.js';
 import { AuthModule } from '../auth/auth.module.js';
 import { JwtModule } from '../common/jwt/jwt.module.js';
 import { UsersModule } from '../users/users.module.js';
+import { RedisService } from '../common/redis/redis.service.js';
 
 @Module({
   imports: [AuthModule,JwtModule,UsersModule],
   controllers: [WorkspacesController],
-  providers: [WorkspacesService, WorkspaceRoleGuard,WorkspacesRepository],
-  exports: [WorkspacesService],
+  providers: [WorkspacesService, WorkspaceRoleGuard,WorkspacesRepository,RedisService],
+  exports: [WorkspacesService,WorkspacesRepository],
 })
 export class WorkspacesModule {};

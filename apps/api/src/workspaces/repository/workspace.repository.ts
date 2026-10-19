@@ -1,11 +1,13 @@
-import { Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { Prisma, WorkspaceRole } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.js';
 import { PrismaTransaction } from '../../database/prisma.service.js';
+import { AppException } from '../../common/exceptions/app.exception.js';
+import { UUID } from 'crypto';
 
 @Injectable()
 export class WorkspacesRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {};
 
   private isPrismaError(
     error: unknown,
@@ -189,7 +191,12 @@ export class WorkspacesRepository {
         throw new WorkspaceMemberAlreadyExistsError();
       }
 
-      throw error;
+      throw new AppException({
+        code: "WORKSPACES_MEMBER_ALREADY_EXISTS_ERROR.",
+        message: "Workspace member already exists.",
+        status: HttpStatus.INTERNAL_SERVER_ERROR,
+        details: new WorkspaceMemberAlreadyExistsError()
+      });
     }
   }
 
@@ -219,6 +226,13 @@ export class WorkspacesRepository {
       },
     });
   }
+
+  findMemberIds(workspaceId: string): Promise<{ userId: string }[]> {
+  return this.prisma.workspaceMember.findMany({
+    where: { workspaceId },
+    select: { userId: true },
+  });
+}
 }
 
 export class WorkspaceMemberAlreadyExistsError extends Error {

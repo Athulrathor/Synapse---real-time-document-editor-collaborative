@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { EmailQueue } from '../email/email.queue.js';
 import { OutboxRepository } from './outbox.repository.js';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
 export class OutboxDispatcherService {
@@ -10,6 +11,7 @@ export class OutboxDispatcherService {
   constructor(
     private readonly outboxRepository: OutboxRepository,
     private readonly emailQueue: EmailQueue,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   @Cron('*/5 * * * * *')
@@ -50,13 +52,27 @@ export class OutboxDispatcherService {
             );
             break;
 
+          case 'DOCUMENT_CREATED': {
+            const documentEvent = event.payload as {
+              documentId: string;
+              workspaceId: string;
+              createdById: string;
+              title: string;
+            };
+
+            this.eventEmitter.emitAsync('document.created', {
+              outboxEventId: event.id,
+              ...documentEvent,
+            });
+
+            break;
+          }
+
           default:
             throw new Error(`Unsupported outbox event: ${event.eventType}`);
         }
 
-        await this.outboxRepository.markProcessed
-        (event.id);
-
+        await this.outboxRepository.markProcessed(event.id);
       } catch (error) {
         const message =
           error instanceof Error ? error.message : 'Unknown error';
