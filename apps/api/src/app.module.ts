@@ -23,6 +23,8 @@ import { DocumentsModule } from './documents/documents.module.js';
 import { CollaborationModule } from './collaboration/collaboration.module.js';
 import { NotificationModule } from './notification/notification.module.js';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { OutboxRepository } from './jobs/outbox/outbox.repository.js';
+import { ActivityModule } from './activity/activity.module.js';
 
 // export const {
 //   ObserveModule,
@@ -66,7 +68,8 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     WorkspacesModule,
     DocumentsModule,
     CollaborationModule,
-    NotificationModule
+    NotificationModule,
+    ActivityModule,
   ],
   controllers: [AppController],
   providers: [
@@ -75,6 +78,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
     },
+    OutboxRepository,
   ],
 })
 export class AppModule {}

@@ -35,7 +35,7 @@ export const envValidationSchema = Joi.object({
 
   GOOGLE_CALLBACK_URL: Joi.string().uri().required(),
 
-  // frontendUrl: Joi.string().required(),
+  FRONTEND_URL: Joi.string().required(),
 
   IMAGEKIT_PUBLIC_KEY: Joi.string().required(),
 

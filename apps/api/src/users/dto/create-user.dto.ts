@@ -1,10 +1,17 @@
-import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
-import { UserStatus } from '@prisma/client'; 
+import {
+  IsEmail,
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
+import { UserStatus } from '@prisma/client';
 
 export class CreateUserDto {
   @IsEmail()
   @IsNotEmpty()
-  @MaxLength(255) 
+  @MaxLength(255)
   readonly email: string;
 
   @IsString()
@@ -18,6 +25,6 @@ export class CreateUserDto {
   // readonly passwordHash: string;
 
   @IsOptional()
-  @IsEnum(UserStatus) 
+  @IsEnum(UserStatus)
   readonly status: UserStatus = UserStatus.PENDING;
 }

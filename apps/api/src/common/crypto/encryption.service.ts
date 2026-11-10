@@ -43,7 +43,6 @@ export class EncryptionService {
   }
 
   decrypt(payload: string): string {
-    console.log("decrypt: ",payload)
     try {
       const parts = payload.split('.');
 

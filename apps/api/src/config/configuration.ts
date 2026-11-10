@@ -2,7 +2,7 @@ export default () => ({
   app: {
     nodeEnv: process.env.NODE_ENV || 'development',
     port: Number(process.env.PORT) || 4000,
-    corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+    corsOrigin: process.env.CORS_ORIGIN || process.env.FRONTEND_URL,
     frontendUrl: process.env.FRONTEND_URL,
   },
 
@@ -36,18 +36,18 @@ export default () => ({
   },
 
   crypto: {
-    encryptionKey: process.env.ENCRYPTION_KEY
+    encryptionKey: process.env.ENCRYPTION_KEY,
   },
 
   auth: {
     googleClientId: process.env.GOOGLE_CLIENT_ID,
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    googleCallbackUrl: process.env.GOOGLE_CALLBACK_URL
+    googleCallbackUrl: process.env.GOOGLE_CALLBACK_URL,
   },
 
   imagekit: {
     imagekitPrivateKey: process.env.IMAGEKIT_PRIVATE_KEY,
     imagekitPublicKey: process.env.IMAGEKIT_PUBLIC_KEY,
     imagekitUrlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT,
-  }
+  },
 });

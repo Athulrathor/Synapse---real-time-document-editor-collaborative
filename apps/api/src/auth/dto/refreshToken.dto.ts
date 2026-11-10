@@ -1,3 +1,4 @@
+import { Avatar, type User } from '@prisma/client';
 import {
   IsInt,
   IsNotEmpty,
@@ -7,12 +8,12 @@ import {
   IsOptional,
   IsBoolean,
 } from 'class-validator';
+import { AuthUserResponse } from './auth.dto.js';
 
 export class RefreshTokenDto {
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(4096)
-  refreshToken!: string;
+  // @IsNotEmpty()
+  @IsOptional()
+  refreshToken?: string;
 }
 
 export class RefreshTokenPayloadDto {
@@ -40,5 +41,9 @@ export class RefreshTokenPayloadDto {
 }
 
 export class RefreshTokenResponseDto {
-  @IsString() @IsNotEmpty() accessToken!: string;
+  @IsString()
+  @IsNotEmpty()
+  accessToken: string;
+
+  user: AuthUserResponse;
 }

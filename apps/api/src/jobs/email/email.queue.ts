@@ -94,4 +94,24 @@ export class EmailQueue {
       },
     );
   }
+
+  async enqueueWorkspaceInvitation(
+    data: Extract<EmailJob, { type: 'workspace-invitation' }>,
+    jobId?: string,
+  ) {
+    return this.queue.add(
+      'workspace-invitation',
+      { ...data },
+      {
+        ...(jobId ? { jobId } : {}),
+        attempts: 5,
+        backoff: {
+          type: 'exponential',
+          delay: 2_000,
+        },
+        removeOnComplete: 1000,
+        removeOnFail: false,
+      },
+    );
+  }
 }

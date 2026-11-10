@@ -1,8 +1,7 @@
-import { HttpStatus, Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { Strategy, type Profile } from 'passport-google-oauth20';
-import { ConfigService } from '@nestjs/config';
-import { AppException } from '../../common/exceptions/app.exception.js';
 
 export interface GoogleUserProfile {
   googleId: string;
@@ -24,28 +23,34 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     });
   }
 
+  authorizationParams(options: any): any {
+    return {
+      ...super.authorizationParams(options),
+      prompt: 'select_account',
+    };
+  }
+
   async validate(
     accessToken: string,
     refreshToken: string,
     profile: Profile,
   ): Promise<GoogleUserProfile> {
-    const email = profile.emails?.[0]?.value?.trim().toLowerCase();
+    const email = profile.emails?.[0]?.value;
+    const emailVerified =
+      (profile._json as { email_verified?: boolean }).email_verified === true;
 
-    if (!profile.id || !email) {
-      throw new AppException({
-        code: "GOOGLE_AUTH_ERROR.",
-        message: "Google account did not provide a valid identity.",
-        status: HttpStatus.UNAUTHORIZED,
-      });
+    if (!profile.id || !email || !emailVerified) {
+      throw new Error('Google account has no verified email.');
     }
+
+    const name = profile.displayName || email;
 
     return {
       googleId: profile.id,
-      email,
-      name: profile.displayName?.trim() || email.split('@')[0],
+      email: email.toLowerCase(),
+      name,
       avatarUrl: profile.photos?.[0]?.value ?? null,
-      emailVerified:
-        (profile._json as { email_verified?: boolean }).email_verified === true,
+      emailVerified,
     };
   }
 }

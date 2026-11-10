@@ -36,11 +36,13 @@ export const env = {
     //   ["http:", "https:"],
     // ),
     apiUrl: process.env["NEXT_PUBLIC_API_URL"],
-    socketUrl: "NEXT_PUBLIC_WS_URL"
+    socketUrl: process.env["NEXT_PUBLIC_WS_URL"],
     // socketUrl: validateUrl(
     //   getRequiredEnv("NEXT_PUBLIC_WS_URL"),
     //   "NEXT_PUBLIC_WS_URL",
     //   ["ws:", "wss:"],
     // ),
+
+    ImagekitUrl: process.env['NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT']
   },
 } as const;

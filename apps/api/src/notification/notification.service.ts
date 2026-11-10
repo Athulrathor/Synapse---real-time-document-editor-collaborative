@@ -3,6 +3,7 @@ import { CreateNotificationDto } from './dto/create-notification.dto.js';
 import { PrismaService } from '../database/prisma.service.js';
 import { NotificationCacheRepository } from './repository/notification-cache.repository.js';
 import { NotificationRepository } from './repository/notification.repository.js';
+import { NotificationResourceType, Prisma } from '@prisma/client';
 
 @Injectable()
 export class NotificationService {
@@ -123,5 +124,23 @@ export class NotificationService {
     }
 
     return result.count > 0;
+  }
+
+  async resolveWorkspaceInvitation(
+    tx: Prisma.TransactionClient,
+    invitationId: string,
+    recipientId: string,
+  ) {
+    return tx.notification.updateMany({
+      where: {
+        recipientId,
+        resourceType: NotificationResourceType.WORKSPACE,
+        resourceId: invitationId,
+        resolvedAt: null,
+      },
+      data: {
+        resolvedAt: new Date(),
+      },
+    });
   }
 }

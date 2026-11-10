@@ -31,3 +31,9 @@ export interface AuthSessionResponse {
   user: AuthUser;
   accessToken: string;
 }
+
+export class changePasswordInput {
+  currentPassword!: string;
+  newPassword!: string;
+  confirmPassword!: string;
+}

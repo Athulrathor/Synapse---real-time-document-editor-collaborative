@@ -31,18 +31,17 @@ export class WorkspaceRoleGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const requiredRoles = this.reflector.getAllAndOverride<
-      WorkspaceRole[]
-    >(ROLES_KEY, [context.getHandler(), context.getClass()]);
+    const requiredRoles = this.reflector.getAllAndOverride<WorkspaceRole[]>(
+      ROLES_KEY,
+      [context.getHandler(), context.getClass()],
+    );
 
     // No role metadata means this guard has no role restriction to enforce.
     if (!requiredRoles?.length) {
       return true;
     }
 
-    const request = context
-      .switchToHttp()
-      .getRequest<AuthenticatedRequest>();
+    const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
 
     const userId = request.user?.userId;
     const workspaceId = request.params?.workspaceId;
@@ -63,11 +62,10 @@ export class WorkspaceRoleGuard implements CanActivate {
       });
     }
 
-    const membership =
-      await this.workspacesRepository.findMembership(
-        workspaceId,
-        userId,
-      );
+    const membership = await this.workspacesRepository.findMembership(
+      workspaceId,
+      userId,
+    );
 
     // Avoid revealing whether a workspace exists to non-members.
     if (!membership) {

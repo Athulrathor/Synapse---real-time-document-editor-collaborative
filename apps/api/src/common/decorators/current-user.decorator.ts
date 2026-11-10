@@ -1,15 +1,19 @@
-
-import {
-  createParamDecorator,
-  ExecutionContext,
-} from '@nestjs/common';
+import { createParamDecorator, ExecutionContext } from '@nestjs/common';
 
 import { type Request } from 'express';
 
 export interface AuthenticatedUser {
   userId: string;
-  email?: string;
+  email: string;
+  name: string;
+  sessionId: string;
   tokenVersion: number;
+  avatar: {
+    id: string;
+    fileId: string;
+    name: string;
+    path: string;
+  } | null;
 }
 
 interface AuthenticatedRequest extends Request {
@@ -18,13 +22,10 @@ interface AuthenticatedRequest extends Request {
 
 export const CurrentUser = createParamDecorator(
   (_data: unknown, context: ExecutionContext): AuthenticatedUser => {
-    const request =
-      context.switchToHttp().getRequest<AuthenticatedRequest>();
+    const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
 
     if (!request.user) {
-      throw new Error(
-        'CurrentUser requires an authenticated request.',
-      );
+      throw new Error('CurrentUser requires an authenticated request.');
     }
 
     return request.user;

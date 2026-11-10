@@ -12,9 +12,7 @@ import { EncryptionService } from '../common/crypto/encryption.service.js';
     BullModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
-        const redisUrl = new URL(
-          config.getOrThrow<string>('redis.url'),
-        );
+        const redisUrl = new URL(config.getOrThrow<string>('redis.url'));
 
         return {
           connection: {
@@ -37,7 +35,7 @@ import { EncryptionService } from '../common/crypto/encryption.service.js';
     EmailModule,
   ],
 
-  providers: [EmailProcessor,EmailQueue,EncryptionService],
-  exports: [BullModule,EmailProcessor,EmailQueue],
+  providers: [EmailProcessor, EmailQueue, EncryptionService],
+  exports: [BullModule, EmailProcessor, EmailQueue],
 })
 export class JobsModule {}

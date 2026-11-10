@@ -23,7 +23,7 @@ export class NotificationRepository {
 
   async create(data: CreateNotificationData) {
     if (data.dedupeKey) {
-      return this.prisma.notification.upsert({
+      return await this.prisma.notification.upsert({
         where: {
           dedupeKey: data.dedupeKey,
         },
@@ -41,7 +41,7 @@ export class NotificationRepository {
       });
     }
 
-    return this.prisma.notification.create({
+    return await this.prisma.notification.create({
       data: {
         recipientId: data.recipientId,
         actorId: data.actorId,
@@ -125,6 +125,24 @@ export class NotificationRepository {
       where: {
         id,
         recipientId,
+      },
+    });
+  }
+
+  async resolveWorkspaceInvitation(
+    tx: Prisma.TransactionClient,
+    invitationId: string,
+    recipientId: string,
+  ) {
+    return tx.notification.updateMany({
+      where: {
+        recipientId,
+        resourceType: NotificationResourceType.WORKSPACE,
+        resourceId: invitationId,
+        resolvedAt: null,
+      },
+      data: {
+        resolvedAt: new Date(),
       },
     });
   }

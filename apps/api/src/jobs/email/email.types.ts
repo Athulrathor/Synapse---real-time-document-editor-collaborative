@@ -1,3 +1,5 @@
+import { WorkspaceRole } from '@prisma/client';
+
 export interface VerificationEmailJob {
   type: 'verification';
   email: string;
@@ -20,7 +22,18 @@ export interface TwoFactorOtpEmailJob {
   expiresInMinutes: number;
 }
 
+export interface WorkspaceInvitationEmailJob {
+  type: 'workspace-invitation';
+  email: string;
+  workspaceName: string;
+  inviterName: string;
+  role: WorkspaceRole;
+  token: string;
+  expiresAt: string;
+}
+
 export type EmailJob =
   | VerificationEmailJob
   | PasswordResetEmailJob
-  | TwoFactorOtpEmailJob;
+  | TwoFactorOtpEmailJob
+  | WorkspaceInvitationEmailJob;

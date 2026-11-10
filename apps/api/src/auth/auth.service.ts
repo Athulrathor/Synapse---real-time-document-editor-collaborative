@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 
 import { RegisterDto } from './dto/register.dto.js';
-import { AuthDto } from './dto/auth.dto.js';
+import { AuthDto, AuthUserResponse } from './dto/auth.dto.js';
 import { CreateUserDto } from '../users/dto/create-user.dto.js';
 
 import { AuthRepository } from './repositories/auth.repository.js';
@@ -30,19 +30,28 @@ import { ResetPasswordDto } from './dto/reset-password.dto.js';
 import { GoogleAccountRepository } from './repositories/google-account.repository.js';
 import type { GoogleUserProfile } from './strategies/google.strategy.js';
 import { ImageKitService } from '../common/imagekit/imagekit.service.js';
+import { ConfigService } from '@nestjs/config';
+import { ChangePasswordDto } from './dto/change-password-dto.js';
 
-export interface Response {
-  accessToken?: string;
+export interface LoginsResponse {
+  accessToken: string;
   refreshToken: string;
   user: {
     id: string;
     email: string;
     name: string;
-    auth?: JSON;
-    avatar?: JSON;
-    google?: JSON;
     status: UserStatus;
     createdAt: Date;
+    auth?: {
+      id: string;
+      emailVerified: boolean;
+    };
+    avatar?: {
+      id: string;
+      name: string;
+      path: string;
+      fileId: string;
+    };
   };
 }
 
@@ -124,6 +133,7 @@ export class AuthService {
     private readonly passwordResetRepository: PasswordResetRepository,
     private readonly googleAccountRepository: GoogleAccountRepository,
     private readonly imagekitService: ImageKitService,
+    private readonly configService: ConfigService,
   ) {}
 
   async registerUser(
@@ -173,8 +183,8 @@ export class AuthService {
 
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-    const user = await this.prisma.$transaction(
-      async (tx: PrismaTransaction) => {
+    const user = await this.prisma
+      .$transaction(async (tx: PrismaTransaction) => {
         const newUser = await this.userRepository.create(
           {
             email: normalizedEmail,
@@ -216,22 +226,22 @@ export class AuthService {
         );
 
         return newUser;
-      },
-    ).catch(async error => {
-      if (uploadResult) {
-        if (uploadResult.fileId)
-          try {
-            await this.imagekitService.deleteImage(uploadResult.fileId);
-          } catch (cleanupError) {
-            // Log cleanup failure for later reconciliation.
-            console.error(
-              'Failed to clean up orphaned Google avatar:',
-              cleanupError,
-            );
-          }
+      })
+      .catch(async (error) => {
+        if (uploadResult) {
+          if (uploadResult.fileId)
+            try {
+              await this.imagekitService.deleteImage(uploadResult.fileId);
+            } catch (cleanupError) {
+              // Log cleanup failure for later reconciliation.
+              console.error(
+                'Failed to clean up orphaned Google avatar:',
+                cleanupError,
+              );
+            }
         }
-      throw error;
-    });
+        throw error;
+      });
 
     const ttlSeconds = Math.floor((expiresAt.getTime() - Date.now()) / 1000);
 
@@ -253,9 +263,7 @@ export class AuthService {
     return;
   }
 
-  async verifyEmail(
-    dto: VerifyEmailDto,
-  ): Promise<void> {
+  async verifyEmail(dto: VerifyEmailDto): Promise<void> {
     const { token } = dto;
 
     const tokenHash = await this.tokenService.hashToken(token);
@@ -320,7 +328,7 @@ export class AuthService {
     ipAddress: string,
     userAgent: string,
     deviceName: string,
-  ): Promise<Response | null> {
+  ): Promise<LoginsResponse> {
     const { email, password } = dto;
 
     const normalizedEmail = email.trim().toLowerCase();
@@ -354,6 +362,14 @@ export class AuthService {
       });
     }
 
+    if (!user?.auth?.passwordHash) {
+      throw new AppException({
+        code: 'GOOGLE_USER_ERROR',
+        message: 'Please login through google sign',
+        status: HttpStatus.UNAUTHORIZED,
+      });
+    }
+
     if (user.auth.lockedUntil && user.auth.lockedUntil > new Date()) {
       throw new AppException({
         code: 'ACCOUNT_LOCKED',
@@ -379,9 +395,7 @@ export class AuthService {
 
     const sessionId = await this.tokenService.createRandomUUID();
 
-    const tokenVersion = await this.authRepository.getTokenVersion(
-      user.id,
-    );
+    const tokenVersion = await this.authRepository.getTokenVersion(user.id);
 
     const accessToken = await this.jwtService.generateAccessToken({
       sub: user.id,
@@ -421,6 +435,16 @@ export class AuthService {
         name: user.name,
         status: user.status,
         createdAt: user.createdAt,
+        avatar: {
+          id: user?.avatar?.id ?? '',
+          name: user?.avatar?.name ?? '',
+          path: user?.avatar?.path ?? '',
+          fileId: user?.avatar?.fileId ?? '',
+        },
+        auth: {
+          id: user?.auth?.id,
+          emailVerified: user?.auth?.emailVerified ?? false,
+        },
       },
     };
   }
@@ -430,14 +454,16 @@ export class AuthService {
     ipAddress: string,
     userAgent: string,
     deviceName: string,
-  ): Promise<Response> {
+  ): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    user: AuthUserResponse;
+  }> {
     const user = await this.resolveGoogleUser(profile);
 
     const sessionId = await this.tokenService.createRandomUUID();
 
-    const tokenVersion = await this.authRepository.getTokenVersion(
-      user.id,
-    );
+    const tokenVersion = await this.authRepository.getTokenVersion(user.id);
 
     const accessToken = await this.jwtService.generateAccessToken({
       sub: user.id,
@@ -467,23 +493,29 @@ export class AuthService {
     });
 
     return {
-      accessToken,
-      refreshToken,
+      accessToken: accessToken,
+      refreshToken: refreshToken,
       user: {
         id: user.id,
-        email: user.email,
         name: user.name,
+        email: user.email,
         status: user.status,
-        createdAt: user.createdAt,
+        avatar: user.avatar
+          ? {
+              id: user.avatar.id,
+              fileId: user.avatar.fileId,
+              name: user.avatar.name,
+              path: user.avatar.path,
+            }
+          : null,
       },
     };
   }
 
   async refreshToken(dto: RefreshTokenDto): Promise<{
-    success: boolean;
-    message: string;
     accessToken: string;
     refreshToken: string;
+    user: AuthUserResponse;
   }> {
     let payload: JwtPayload;
 
@@ -528,8 +560,9 @@ export class AuthService {
       });
     }
 
-    const currentTokenVersion =
-      await this.authRepository.getTokenVersion(user.id);
+    const currentTokenVersion = await this.authRepository.getTokenVersion(
+      user.id,
+    );
 
     if (currentTokenVersion !== payload.tokenVersion) {
       throw new AppException({
@@ -606,10 +639,22 @@ export class AuthService {
 
     // 10. Return the new tokens only after rotation succeeds.
     return {
-      success: true,
-      message: 'Tokens refreshed successfully.',
       accessToken: newAccessToken,
       refreshToken: newRefreshToken,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        status: user.status,
+        avatar: user.avatar
+          ? {
+              id: user.avatar.id,
+              fileId: user.avatar.fileId,
+              name: user.avatar.name,
+              path: user.avatar.path,
+            }
+          : null,
+      },
     };
   }
 
@@ -630,9 +675,7 @@ export class AuthService {
     return;
   }
 
-  async forgetPassword(
-    dto: ForgotPasswordDto,
-  ): Promise<void> {
+  async forgetPassword(dto: ForgotPasswordDto): Promise<void> {
     const { email } = dto;
 
     const normalizedEmail = email.trim().toLowerCase();
@@ -682,7 +725,7 @@ export class AuthService {
   async verifyResetPasswordOtp(data: {
     email: string;
     otp?: string | undefined;
-  }): Promise<{resetToken: string }> {
+  }): Promise<{ resetToken: string }> {
     const { email, otp } = data;
     const normalizedEmail = email.trim().toLowerCase();
 
@@ -747,7 +790,7 @@ export class AuthService {
       600,
     );
 
-    return {resetToken: resetToken};
+    return { resetToken: resetToken };
   }
 
   async resetPassword(dto: ResetPasswordDto): Promise<void> {
@@ -777,127 +820,404 @@ export class AuthService {
     return;
   }
 
-  async resolveGoogleUser(profile: GoogleUserProfile) {
-    const existingGoogleAccount =
-      await this.googleAccountRepository.findByGoogleId(profile.googleId);
+  // async resolveGoogleUser(profile: GoogleUserProfile) {
+  //   // 1. Find an existing Google account.
+  //   const existingGoogleAccount =
+  //     await this.googleAccountRepository.findByGoogleId(profile.googleId);
 
-    if (existingGoogleAccount) {
-      if (existingGoogleAccount.user.status !== UserStatus.ACTIVE) {
-        throw new AppException({
-          code: 'ACCOUNT_UNAVAILABLE',
-          message: 'This account is unavailable.',
-          status: HttpStatus.FORBIDDEN,
-        });
-      }
+  //   if (existingGoogleAccount) {
+  //     if (existingGoogleAccount.user.status !== UserStatus.ACTIVE) {
+  //       throw new AppException({
+  //         code: 'ACCOUNT_UNAVAILABLE',
+  //         message: 'This account is unavailable.',
+  //         status: HttpStatus.FORBIDDEN,
+  //       });
+  //     }
 
-      return existingGoogleAccount.user;
+  //     return existingGoogleAccount.user;
+  //   }
+
+  //   // 2. Require a verified Google email.
+  //   if (!profile.emailVerified) {
+  //     throw new AppException({
+  //       code: 'GOOGLE_EMAIL_NOT_VERIFIED',
+  //       message: 'Your Google email must be verified.',
+  //       status: HttpStatus.FORBIDDEN,
+  //     });
+  //   }
+
+  //   // 3. Do not silently link Google to an existing account.
+  //   const existingUser = await this.userRepository.findByEmailWithAuth(
+  //     profile.email,
+  //   );
+
+  //   if (existingUser) {
+  //     throw new AppException({
+  //       code: 'GOOGLE_ACCOUNT_LINK_REQUIRED',
+  //       message:
+  //         'An account with this email already exists. Sign in using your existing method before linking Google.',
+  //       status: HttpStatus.CONFLICT,
+  //     });
+  //   }
+
+  //   // 4. Download and upload the avatar only when creating a new user.
+  //   let uploadedAvatar: {
+  //     fileId: string;
+  //     filePath: string;
+  //     name: string;
+  //   } | null = null;
+
+  //   if (profile.avatarUrl) {
+  //     try {
+  //       const avatarBuffer = await this.downloadGoogleAvatar(profile.avatarUrl);
+
+  //       if (avatarBuffer) {
+  //         const avatarFileName = `google-avatar-${profile.googleId}.jpg`;
+
+  //         uploadedAvatar = (await this.imagekitService.uploadAvatar(
+  //           avatarBuffer,
+  //           avatarFileName,
+  //         )) as {
+  //           fileId: string;
+  //           filePath: string;
+  //           name: string;
+  //         };
+  //       }
+  //     } catch {
+  //       // Avatar upload is optional; authentication can continue without it.
+  //       uploadedAvatar = null;
+  //     }
+  //   }
+
+  //   // 5. Create the user and related records atomically.
+  //   try {
+  //     return await this.prisma.$transaction(async (tx: PrismaTransaction) => {
+  //       const user = await tx.user.create({
+  //         data: {
+  //           email: profile.email,
+  //           name: profile.name,
+  //           status: UserStatus.ACTIVE,
+  //         },
+  //       });
+
+  //       const auth = await tx.userAuth.create({
+  //         data: {
+  //           userId: user.id,
+  //           passwordHash: null,
+  //           emailVerified: profile.emailVerified,
+  //         },
+  //       });
+
+  //       const google = await tx.googleAccount.create({
+  //         data: {
+  //           userId: user.id,
+  //           googleId: profile.googleId,
+  //           email: profile.email,
+  //           emailVerified: profile.emailVerified,
+  //         },
+  //       });
+
+  //       const avatar = uploadedAvatar
+  //         ? await tx.avatar.create({
+  //             data: {
+  //               name: uploadedAvatar.name,
+  //               fileId: uploadedAvatar.fileId,
+  //               path: uploadedAvatar.filePath,
+  //               userId: user.id,
+  //             },
+  //           })
+  //         : null;
+
+  //       return {
+  //         id: user.id,
+  //         email: user.email,
+  //         name: user.name,
+  //         status: user.status,
+  //         createdAt: user.createdAt,
+  //         auth: {
+  //           id: auth.id,
+  //           emailVerified: auth.emailVerified,
+  //         },
+  //         avatar: avatar
+  //           ? {
+  //               id: avatar.id,
+  //               name: avatar.name,
+  //               path: avatar.path,
+  //               fileId: avatar.fileId,
+  //             }
+  //           : null,
+  //         googleAccount: {
+  //           id: google.id,
+  //           googleId: google.googleId,
+  //         },
+  //       };
+  //     });
+  //   } catch (error) {
+  //     // Clean up the external file if the database transaction fails.
+  //     if (uploadedAvatar) {
+  //       try {
+  //         await this.imagekitService.deleteImage(uploadedAvatar.fileId);
+  //       } catch (cleanupError) {
+  //         console.error(
+  //           'Failed to clean up orphaned Google avatar:',
+  //           cleanupError,
+  //         );
+  //       }
+  //     }
+
+  //     // Preserve intentional application errors.
+  //     if (error instanceof AppException) {
+  //       throw error;
+  //     }
+
+  //     // Avoid misreporting database failures as avatar upload failures.
+  //     console.error('Failed to create Google user:', error);
+
+  //     throw new AppException({
+  //       code: 'GOOGLE_USER_CREATION_FAILED',
+  //       message: 'Unable to create your account with Google.',
+  //       status: HttpStatus.INTERNAL_SERVER_ERROR,
+  //     });
+  //   }
+  // }
+
+  // async generateGoogleOAuthState(): Promise<string> {
+  //   const state = await this.tokenService.generateRandomToken(32);
+
+  //   const created = await this.verificationRepository.createGoogleOAuthState(
+  //     state,
+  //     300,
+  //   );
+
+  //   if (!created) {
+  //     throw new AppException({
+  //       code: '',
+  //       message: 'Failed to initialize Google authentication.',
+  //       status: HttpStatus.INTERNAL_SERVER_ERROR,
+  //     });
+  //   }
+
+  //   return state;
+  // }
+
+  // async consumeGoogleOAuthState(state: string): Promise<boolean> {
+  //   if (!state || state.length > 256) {
+  //     return false;
+  //   }
+
+  //   return this.verificationRepository.consumeGoogleOAuthState(state);
+  // }
+
+  private async resolveGoogleUser(
+    profile: GoogleUserProfile,
+  ): Promise<AuthUserResponse> {
+    const googleId = profile.googleId?.trim();
+    const email = profile.email?.trim().toLowerCase();
+
+    if (!googleId || !email) {
+      throw new AppException({
+        code: 'INVALID_GOOGLE_PROFILE',
+        message: 'Google did not provide the required account information.',
+      });
     }
 
     if (!profile.emailVerified) {
       throw new AppException({
         code: 'GOOGLE_EMAIL_NOT_VERIFIED',
-        message: 'Your Google email must be verified.',
-        status: HttpStatus.FORBIDDEN,
+        message: 'Your Google email address must be verified.',
       });
     }
 
-    const existingUser = await this.userRepository.findByEmailWithAuth(
-      profile.email,
-    );
+    // 1. Find an existing Google account using Google's stable ID.
+    const existingGoogleAccount = await this.prisma.googleAccount.findUnique({
+      where: { googleId },
+      include: {
+        user: {
+          include: {
+            auth: {
+              select: {
+                id: true,
+                emailVerified: true,
+                twoFactorEnabled: true,
+              },
+            },
+            avatar: {
+              select: {
+                id: true,
+                name: true,
+                fileId: true,
+                path: true,
+              },
+            },
+            googleAccount: true,
+          },
+        },
+      },
+    });
 
-    let uploadedAvatar: {
-      url: string;
-      fileId: string;
-      filePath: string;
-      name: string;
-    } | null = null;
+    if (existingGoogleAccount) {
+      const user = existingGoogleAccount.user;
 
-    if (profile.avatarUrl) {
-      const avatarBuffer = await this.downloadGoogleAvatar(profile.avatarUrl);
-
-      if (avatarBuffer) {
-        const avatarFileName = `google-avatar-${profile.googleId}.jpg`;
-
-        uploadedAvatar = (await this.imagekitService.uploadAvatar(
-          avatarBuffer,
-          avatarFileName,
-        )) as {
-          url: string;
-          fileId: string;
-          filePath: string;
-          name: string;
-        };
+      if (user.status !== 'ACTIVE') {
+        throw new AppException({
+          code: 'ACCOUNT_INACTIVE',
+          message: 'Your account is inactive.',
+        });
       }
+
+      return user;
     }
 
+    // 2. Check whether a Synapse account already uses this email.
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email },
+      include: {
+        auth: true,
+        avatar: true,
+        googleAccount: true,
+      },
+    });
+
     if (existingUser) {
+      // Do not automatically link accounts based only on matching email.
       throw new AppException({
         code: 'GOOGLE_ACCOUNT_LINK_REQUIRED',
         message:
-          'An account with this email already exists. Sign in using your existing method before linking Google.',
-        status: HttpStatus.CONFLICT,
+          'An account with this email already exists. Sign in to your existing account and connect Google from account settings.',
       });
     }
 
-    return await this.prisma
-      .$transaction(async (tx: PrismaTransaction) => {
-        const user = await tx.user.create({
+    // 3. Create a new user and Google account atomically.
+    try {
+      const user = await this.prisma.$transaction(async (tx) => {
+        const createdUser = await tx.user.create({
           data: {
-            email: profile.email,
-            name: profile.name,
-            status: UserStatus.ACTIVE,
-          },
-        });
-
-        await tx.userAuth.create({
-          data: {
-            userId: user.id,
-            passwordHash: null,
-            emailVerified: profile.emailVerified,
-          },
-        });
-
-        await tx.googleAccount.create({
-          data: {
-            userId: user.id,
-            googleId: profile.googleId,
-            email: profile.email,
-            emailVerified: profile.emailVerified,
-          },
-        });
-
-        if (uploadedAvatar) {
-          await tx.avatar.create({
-            data: {
-              name: uploadedAvatar.name,
-              fileId: uploadedAvatar.fileId,
-              path: uploadedAvatar.filePath,
-              userId: user.id,
+            email,
+            name: profile.name?.trim() || email.split('@')[0],
+            status: 'ACTIVE',
+            auth: {
+              create: {
+                passwordHash: null,
+                emailVerified: true,
+              },
             },
+            googleAccount: {
+              create: {
+                googleId,
+                email,
+              },
+            },
+          },
+          include: {
+            auth: true,
+            avatar: true,
+            googleAccount: true,
+          },
+        });
+
+        return createdUser;
+      });
+
+      return user;
+    } catch (error) {
+      // A concurrent OAuth request may have created the same user
+      // or Google account. Recheck before deciding how to proceed.
+      const linkedAccount = await this.prisma.googleAccount.findUnique({
+        where: { googleId },
+        include: {
+          user: {
+            include: {
+              auth: true,
+              avatar: true,
+              googleAccount: true,
+            },
+          },
+        },
+      });
+
+      if (linkedAccount) {
+        if (linkedAccount.user.status !== 'ACTIVE') {
+          throw new AppException({
+            code: 'ACCOUNT_INACTIVE',
+            message: 'Your account is inactive.',
           });
         }
 
-        return user;
-      })
-      .catch(async (error) => {
-        if (uploadedAvatar) {
-          try {
-            await this.imagekitService.deleteImage(uploadedAvatar.fileId);
-          } catch (cleanupError) {
-            // Log cleanup failure for later reconciliation.
-            console.error(
-              'Failed to clean up orphaned Google avatar:',
-              cleanupError,
-            );
-          }
-        }
+        return linkedAccount.user;
+      }
 
-        throw new AppException({
-          code: 'UPLOAD_ERROR',
-          message: 'failed filed clean up done.',
-          details: error,
-          status: HttpStatus.BAD_REQUEST,
-        });
+      const userByEmail = await this.prisma.user.findUnique({
+        where: { email },
       });
+
+      if (userByEmail) {
+        throw new AppException({
+          code: 'GOOGLE_ACCOUNT_LINK_REQUIRED',
+          message:
+            'An account with this email already exists. Sign in to your existing account and connect Google from account settings.',
+        });
+      }
+
+      throw error;
+    }
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto): Promise<void> {
+    const { currentPassword, newPassword, confirmPassword } = dto;
+
+    // 1. Validate password confirmation.
+    if (newPassword !== confirmPassword) {
+      throw new AppException({
+        code: 'PASSWORD_MISMATCH',
+        message: 'New password and confirmation do not match.',
+        status: HttpStatus.BAD_REQUEST,
+      });
+    }
+
+    // 2. Prevent reusing the current password.
+    if (currentPassword === newPassword) {
+      throw new AppException({
+        code: 'SAME_PASSWORD',
+        message: 'New password must be different from your current password.',
+        status: HttpStatus.BAD_REQUEST,
+      });
+    }
+
+    // 3. Retrieve the existing password hash.
+    const passwordHash = await this.authRepository.findPasswordHash(userId);
+
+    if (!passwordHash) {
+      throw new AppException({
+        code: 'PASSWORD_NOT_CONFIGURED',
+        message: 'This account does not have a password configured.',
+        status: HttpStatus.BAD_REQUEST,
+      });
+    }
+
+    // 4. Verify the current password.
+    const isCurrentPasswordValid = await this.passwordService.verify(
+      passwordHash,
+      currentPassword,
+    );
+
+    if (!isCurrentPasswordValid) {
+      throw new AppException({
+        code: 'INVALID_CURRENT_PASSWORD',
+        message: 'Your current password is incorrect.',
+        status: HttpStatus.UNAUTHORIZED,
+      });
+    }
+
+    // 5. Hash the new password.
+    const newPasswordHash = await this.passwordService.hash(newPassword);
+
+    // 6. Update password and increment tokenVersion atomically.
+    await this.authRepository.resetPasswordAndIncrementTokenVersion(
+      userId,
+      newPasswordHash,
+    );
+
+    // 7. Revoke all Redis sessions.
+    await this.sessionRepository.revokeAllUserSessions(userId);
   }
 }

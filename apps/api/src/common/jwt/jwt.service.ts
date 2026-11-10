@@ -11,39 +11,27 @@ export class JwtTokenService {
 
   async generateAccessToken(payload: object): Promise<string> {
     return this.jwtService.signAsync(payload, {
-      secret: this.configService.getOrThrow<string>(
-        'jwt.accessSecret',
-      ),
+      secret: this.configService.getOrThrow<string>('jwt.accessSecret'),
       expiresIn: '10m',
     });
   }
 
   async generateRefreshToken(payload: object): Promise<string> {
     return this.jwtService.signAsync(payload, {
-      secret: this.configService.getOrThrow<string>(
-        'jwt.refreshSecret',
-      ),
+      secret: this.configService.getOrThrow<string>('jwt.refreshSecret'),
       expiresIn: '30d',
     });
   }
 
-  async verifyAccessToken<T extends object>(
-    token: string,
-  ): Promise<T> {
+  async verifyAccessToken<T extends object>(token: string): Promise<T> {
     return this.jwtService.verifyAsync<T>(token, {
-      secret: this.configService.getOrThrow<string>(
-        'jwt.accessSecret',
-      ),
+      secret: this.configService.getOrThrow<string>('jwt.accessSecret'),
     });
   }
 
-  async verifyRefreshToken<T extends object>(
-    token: string,
-  ): Promise<T> {
+  async verifyRefreshToken<T extends object>(token: string): Promise<T> {
     return this.jwtService.verifyAsync<T>(token, {
-      secret: this.configService.getOrThrow<string>(
-        'jwt.refreshSecret',
-      ),
+      secret: this.configService.getOrThrow<string>('jwt.refreshSecret'),
     });
   }
 }

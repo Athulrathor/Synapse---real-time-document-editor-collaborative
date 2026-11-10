@@ -1,25 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import { UUID } from 'crypto';
 import { RedisService } from '../common/redis/redis.service.js';
-
-// interface DocumentPresence {
-//   userId: UUID;
-//   socketIds: Set<string>;
-//   status: 'viewing' | 'editing';
-//   isTyping: boolean;
-//   cursorPosition?: number;
-//   selectionEnd?: number;
-//   lastActiveAt: number;
-// }
+import { PrismaService } from '../database/prisma.service.js';
 
 interface StoredDocumentPresence {
   userId: UUID;
   socketIds: string[];
+  name: string;
   status: 'viewing' | 'editing';
   isTyping: boolean;
   cursorPosition?: number;
   selectionEnd?: number;
   lastActiveAt: number;
+  avatarPath?: string;
 }
 
 const ADD_PRESENCE_SOCKET_SCRIPT = `
@@ -34,6 +27,8 @@ const ADD_PRESENCE_SOCKET_SCRIPT = `
   local socketId = ARGV[2]
   local now = tonumber(ARGV[3])
   local ttl = tonumber(ARGV[4])
+  local avatarPath = ARGV[5]
+  local name = ARGV[6]
 
   if not data[userId] then
     data[userId] = {
@@ -41,13 +36,18 @@ const ADD_PRESENCE_SOCKET_SCRIPT = `
       socketIds = {},
       status = 'viewing',
       isTyping = false,
-      lastActiveAt = now
+      lastActiveAt = now,
+      avatarPath = cjson.null,
+      name = 'Collaborator',
+      cursorPosition = cjson.null,
+      selectionEnd = cjson.null,
+      isTyping = false
     }
   end
 
   local presence = data[userId]
-  local found = false
 
+  local found = false
   for _, id in ipairs(presence.socketIds) do
     if id == socketId then
       found = true
@@ -57,6 +57,14 @@ const ADD_PRESENCE_SOCKET_SCRIPT = `
 
   if not found then
     table.insert(presence.socketIds, socketId)
+  end
+
+  if avatarPath ~= '' then
+    presence.avatarPath = avatarPath
+  end
+
+  if name ~= '' then
+    presence.name = name
   end
 
   presence.lastActiveAt = now
@@ -70,7 +78,7 @@ const REMOVE_PRESENCE_SOCKET_SCRIPT = `
   local raw = redis.call('GET', KEYS[1])
 
   if not raw then
-    return nil
+    return cjson.encode({ userLeft = false })
   end
 
   local data = cjson.decode(raw)
@@ -81,7 +89,7 @@ const REMOVE_PRESENCE_SOCKET_SCRIPT = `
   local presence = data[userId]
 
   if not presence then
-    return cjson.encode(data)
+    return cjson.encode({ userLeft = false })
   end
 
   local remainingSockets = {}
@@ -94,18 +102,19 @@ const REMOVE_PRESENCE_SOCKET_SCRIPT = `
 
   presence.socketIds = remainingSockets
 
-  if #remainingSockets == 0 then
+  local userLeft = (#remainingSockets == 0)
+
+  if userLeft then
     data[userId] = nil
   end
 
   if next(data) == nil then
     redis.call('DEL', KEYS[1])
-    return nil
+  else
+    redis.call('SET', KEYS[1], cjson.encode(data), 'EX', ttl)
   end
 
-  redis.call('SET', KEYS[1], cjson.encode(data), 'EX', ttl)
-
-  return cjson.encode(data)
+  return cjson.encode({ userLeft = userLeft })
 `;
 
 const UPDATE_PRESENCE_FIELD_SCRIPT = `
@@ -121,6 +130,7 @@ const UPDATE_PRESENCE_FIELD_SCRIPT = `
   local value = ARGV[3]
   local now = tonumber(ARGV[4])
   local ttl = tonumber(ARGV[5])
+  local path = tostring(ARGV[6])
 
   local presence = data[userId]
 
@@ -164,6 +174,7 @@ const UPDATE_CURSOR_SCRIPT = `
   local selectionEnd = tonumber(ARGV[3])
   local now = tonumber(ARGV[4])
   local ttl = tonumber(ARGV[5])
+  local path = tostring(ARGV[6])
 
   local presence = data[userId]
 
@@ -192,7 +203,10 @@ const PRESENCE_TTL_SECONDS = 24 * 60 * 60;
 export class PresenceService {
   //   private readonly documents = new Map<UUID, Map<UUID, DocumentPresence>>();
 
-  constructor(private readonly redisService: RedisService) {}
+  constructor(
+    private readonly redisService: RedisService,
+    private readonly prismaService: PrismaService,
+  ) {}
 
   private getPresenceKey(documentId: UUID): string {
     return `${PRESENCE_KEY_PREFIX}${documentId}`;
@@ -229,13 +243,22 @@ export class PresenceService {
     documentId: UUID,
     userId: UUID,
     socketId: string,
+    avatarPath: string,
+    name: string,
   ): Promise<void> {
     const key = this.getPresenceKey(documentId);
 
-    await this.redisService.updateJsonAtomically(
+    const res = await this.redisService.updateJsonAtomically(
       key,
       ADD_PRESENCE_SOCKET_SCRIPT,
-      [userId, socketId, String(Date.now()), String(PRESENCE_TTL_SECONDS)],
+      [
+        userId,
+        socketId,
+        String(Date.now()),
+        String(PRESENCE_TTL_SECONDS),
+        avatarPath,
+        name,
+      ],
     );
   }
 
@@ -263,14 +286,18 @@ export class PresenceService {
     documentId: UUID,
     userId: UUID,
     socketId: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const key = this.getPresenceKey(documentId);
 
-    await this.redisService.updateJsonAtomically(
-      key,
-      REMOVE_PRESENCE_SOCKET_SCRIPT,
-      [userId, socketId, String(PRESENCE_TTL_SECONDS)],
-    );
+    const result = await this.redisService.updateJsonAtomically<{
+      userLeft: boolean;
+    }>(key, REMOVE_PRESENCE_SOCKET_SCRIPT, [
+      userId,
+      socketId,
+      String(PRESENCE_TTL_SECONDS),
+    ]);
+
+    return result?.userLeft ?? false;
   }
 
   //   setStatus(
@@ -408,11 +435,13 @@ export class PresenceService {
       totalActiveUsers: users.length,
       users: users.map((presence) => ({
         userId: presence.userId,
+        name: presence?.name ?? '',
         status: presence.status,
         isTyping: presence.isTyping,
         cursorPosition: presence.cursorPosition,
         selectionEnd: presence.selectionEnd,
         lastActiveAt: presence.lastActiveAt,
+        avatarPath: presence?.avatarPath ?? '',
       })),
     };
   }

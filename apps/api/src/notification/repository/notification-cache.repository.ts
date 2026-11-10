@@ -23,24 +23,17 @@ export class NotificationCacheRepository {
     return cached ?? null;
   }
 
-  async setUnreadCount(
-    recipientId: string,
-    count: number,
-  ): Promise<void> {
+  async setUnreadCount(recipientId: string, count: number): Promise<void> {
     const key = this.getUnreadCountKey(recipientId);
 
     await this.redis.setCache(key, count, this.CACHE_TTL);
   }
 
   async invalidateUnreadCount(recipientId: string): Promise<void> {
-    await this.redis.deleteCache(
-      this.getUnreadCountKey(recipientId),
-    );
+    await this.redis.deleteCache(this.getUnreadCountKey(recipientId));
   }
 
-  async getNotificationList<T>(
-    recipientId: string,
-  ): Promise<T | null> {
+  async getNotificationList<T>(recipientId: string): Promise<T | null> {
     const key = this.getNotificationListKey(recipientId);
 
     const cached = await this.redis.getCache<T>(key);
@@ -54,24 +47,14 @@ export class NotificationCacheRepository {
   ): Promise<void> {
     const key = this.getNotificationListKey(recipientId);
 
-    await this.redis.setCache(
-      key,
-      notifications,
-      this.CACHE_TTL,
-    );
+    await this.redis.setCache(key, notifications, this.CACHE_TTL);
   }
 
-  async invalidateNotificationList(
-    recipientId: string,
-  ): Promise<void> {
-    await this.redis.deleteCache(
-      this.getNotificationListKey(recipientId),
-    );
+  async invalidateNotificationList(recipientId: string): Promise<void> {
+    await this.redis.deleteCache(this.getNotificationListKey(recipientId));
   }
 
-  async invalidateRecipientCache(
-    recipientId: string,
-  ): Promise<void> {
+  async invalidateRecipientCache(recipientId: string): Promise<void> {
     await Promise.all([
       this.invalidateUnreadCount(recipientId),
       this.invalidateNotificationList(recipientId),

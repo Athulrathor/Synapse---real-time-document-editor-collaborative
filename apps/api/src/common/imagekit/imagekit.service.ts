@@ -17,7 +17,9 @@ export class ImageKitService {
 
   constructor(private readonly configService: ConfigService) {
     this.imagekit = new ImageKit({
-      privateKey: this.configService.getOrThrow<string>('imagekit.imagekitPrivateKey'),
+      privateKey: this.configService.getOrThrow<string>(
+        'imagekit.imagekitPrivateKey',
+      ),
     });
   }
 
@@ -42,10 +44,10 @@ export class ImageKitService {
       console.error('ImageKit avatar upload failed:', error);
 
       throw new AppException({
-        code: "IMAGEKIT_UPLOAD_FAILED",
-        message: "Avatar upload failed.",
+        code: 'IMAGEKIT_UPLOAD_FAILED',
+        message: 'Avatar upload failed.',
         status: HttpStatus.INTERNAL_SERVER_ERROR,
-        details: error
+        details: error,
       });
     }
   }

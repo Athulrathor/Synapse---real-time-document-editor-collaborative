@@ -7,7 +7,7 @@ export class VerificationDto {
 
   @IsString()
   @IsNotEmpty()
-  readonly token: string; 
+  readonly token: string;
 
   @IsDateString()
   @IsNotEmpty()

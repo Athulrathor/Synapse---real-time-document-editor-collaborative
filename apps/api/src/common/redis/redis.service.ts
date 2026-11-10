@@ -7,7 +7,13 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   private readonly redis: Redis;
 
   constructor(private readonly configService: ConfigService) {
-    this.redis = new Redis(this.configService.getOrThrow<string>('redis.url'));
+    this.redis = new Redis(this.configService.getOrThrow<string>('redis.url'), {
+      maxRetriesPerRequest: null, // 👈 Fixes the MaxRetriesPerRequestError crash
+      retryStrategy(times) {
+        const delay = Math.min(times * 50, 2000);
+        return delay; // Keeps reconnecting seamlessly during network drops
+      },
+    });
 
     this.redis.on('error', (err: Error) => {
       console.error('Redis connection error:', err);
@@ -77,79 +83,131 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     }
 
     const script = `
-    local raw = redis.call('GET', KEYS[1])
+  local raw = redis.call('GET', KEYS[1])
 
-    if not raw then
+  if not raw then
+    return 0
+  end
+
+  local ok, data = pcall(cjson.decode, raw)
+
+  if not ok or type(data) ~= 'table' then
+    return -1
+  end
+
+  -- Validate session when validation arguments are provided.
+  if ARGV[5] == '1' then
+    -- Verify user ID.
+    if data.userId ~= ARGV[6] then
       return 0
     end
 
-    local ok, data = pcall(cjson.decode, raw)
+    -- Verify session ID.
+    if data.id ~= ARGV[7] then
+      return 0
+    end
 
-    if not ok or type(data) ~= 'table' then
+    -- Reject revoked sessions.
+    if data.revokedAt ~= cjson.null then
+      return 0
+    end
+
+    -- Validate expiration field.
+    local expiresAt = data.expiresAt
+
+    if type(expiresAt) ~= 'string' and type(expiresAt) ~= 'number' then
       return -1
     end
 
-    if ARGV[5] == '1' then
-      if data.userId ~= ARGV[6] then
-        return 0
-      end
+    local expiryMs = nil
 
-      if data.id ~= ARGV[7] then
-        return 0
-      end
+    if type(expiresAt) == 'string' then
+      -- Accept UTC ISO-8601 timestamps, with optional milliseconds.
+      local year, month, day, hour, minute, second, millis, zone =
+        string.match(
+          expiresAt,
+          '^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)%.?(%d*)(.*)$'
+        )
 
-      if data.revokedAt ~= cjson.null then
-        return 0
-      end
-
-      local expiresAt = data.expiresAt
-
-      if type(expiresAt) ~= 'string' and type(expiresAt) ~= 'number' then
+      if not year then
         return -1
       end
 
-      if type(expiresAt) == 'string' then
-        -- Session timestamps are stored as ISO strings.
-        -- Convert the ISO timestamp to milliseconds for comparison.
-        local year, month, day, hour, minute, second, millis =
-          string.match(
-            expiresAt,
-            '^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)%.?(%d*)'
-          )
-
-        if not year then
-          return -1
-        end
-
-        local timestamp = os.time({
-          year = tonumber(year),
-          month = tonumber(month),
-          day = tonumber(day),
-          hour = tonumber(hour),
-          min = tonumber(minute),
-          sec = tonumber(second)
-        }) * 1000 + tonumber(string.sub((millis or '') .. '000', 1, 3))
-
-        if timestamp <= tonumber(ARGV[8]) then
-          return 0
-        end
-      else
-        if tonumber(expiresAt) <= tonumber(ARGV[8]) then
-          return 0
-        end
+      -- Only accept UTC timestamps or timestamps without a suffix.
+      if zone ~= 'Z' and zone ~= '' then
+        return -1
       end
+
+      local y = tonumber(year)
+      local m = tonumber(month)
+      local d = tonumber(day)
+      local h = tonumber(hour)
+      local min = tonumber(minute)
+      local sec = tonumber(second)
+
+      -- Basic range validation.
+      if m < 1 or m > 12 or d < 1 or d > 31 then
+        return -1
+      end
+
+      if h < 0 or h > 23 or min < 0 or min > 59 or sec < 0 or sec > 59 then
+        return -1
+      end
+
+      -- Convert calendar date to days since Unix epoch.
+      -- This avoids os.time(), which is unavailable in Redis Lua.
+      if m <= 2 then
+        y = y - 1
+      end
+
+      local era = math.floor(y / 400)
+      local yoe = y - era * 400
+      local adjustedMonth = m + (m > 2 and -3 or 9)
+      local doy = math.floor((153 * adjustedMonth + 2) / 5) + d - 1
+
+      local doe =
+        yoe * 365
+        + math.floor(yoe / 4)
+        - math.floor(yoe / 100)
+        + doy
+
+      local days = era * 146097 + doe - 719468
+
+      local milliseconds =
+        tonumber(string.sub((millis or '') .. '000', 1, 3))
+
+      expiryMs =
+        (
+          days * 86400
+          + h * 3600
+          + min * 60
+          + sec
+        ) * 1000
+        + milliseconds
+    else
+      -- Numeric timestamps are expected to be Unix milliseconds.
+      expiryMs = tonumber(expiresAt)
     end
 
-    if data[ARGV[1]] ~= ARGV[2] then
+    -- Reject invalid or expired sessions.
+    if not expiryMs or expiryMs <= tonumber(ARGV[8]) then
       return 0
     end
+  end
 
-    data[ARGV[1]] = ARGV[3]
+  -- Compare the stored refresh-token hash.
+  if data[ARGV[1]] ~= ARGV[2] then
+    return 0
+  end
 
-    redis.call('SET', KEYS[1], cjson.encode(data), 'EX', ARGV[4])
+  -- Rotate the refresh-token hash.
+  data[ARGV[1]] = ARGV[3]
 
-    return 1
-  `;
+  -- Save the updated session and reset its TTL atomically.
+  redis.call('SET', KEYS[1], cjson.encode(data), 'EX', ARGV[4])
+
+  return 1
+`;
 
     const result = await this.redis.eval(
       script,
@@ -484,4 +542,42 @@ return count
   // async incrementCacheVersion(key: string): Promise<number> {
   //   return this.redis.incr(key);
   // }
+
+  async createGoogleOAuthState(
+    state: string,
+    ttlSeconds = 300,
+  ): Promise<boolean> {
+    if (!Number.isInteger(ttlSeconds) || ttlSeconds <= 0) {
+      throw new Error('TTL must be a positive integer.');
+    }
+
+    const result = await this.redis.set(
+      `auth:google-oauth-state:${state}`,
+      '1',
+      'EX',
+      ttlSeconds,
+      'NX',
+    );
+
+    return result === 'OK';
+  }
+
+  async consumeGoogleOAuthState(state: string): Promise<boolean> {
+    const result = await this.redis.eval(
+      `
+      local value = redis.call('GET', KEYS[1])
+
+      if not value then
+        return 0
+      end
+
+      redis.call('DEL', KEYS[1])
+      return 1
+    `,
+      1,
+      `auth:google-oauth-state:${state}`,
+    );
+
+    return result === 1;
+  }
 }

@@ -17,6 +17,7 @@ export interface AuthenticatedSocketUser {
   email?: string;
   sessionId: string;
   tokenVersion: number;
+  avatarPath?: string;
 }
 
 const INVALID_ACCESS_TOKEN = {
@@ -91,6 +92,7 @@ export class CollaborationAuthService {
       email: payload.email,
       sessionId: session.id,
       tokenVersion: payload.tokenVersion,
+      avatarPath: user.avatar?.path,
     };
   }
 }

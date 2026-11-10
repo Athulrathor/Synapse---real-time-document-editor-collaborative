@@ -11,6 +11,7 @@ import {
 } from '../utils/document-snapshot.util.js';
 import { Bytes } from '@prisma/client/runtime/client';
 import { OutboxRepository } from '../../jobs/outbox/outbox.repository.js';
+import { YjsPersistenceService } from '../../collaboration/yjs/yjs-persistence.service.js';
 
 @Injectable()
 export class DocumentsRepository {
@@ -18,6 +19,7 @@ export class DocumentsRepository {
     private readonly prisma: PrismaService,
     private readonly redisService: RedisService,
     private readonly outboxRepository: OutboxRepository,
+    private readonly yjsPersistenceService: YjsPersistenceService,
   ) {}
 
   private async invalidateWorkspaceDocumentCaches(
@@ -106,6 +108,26 @@ export class DocumentsRepository {
             createdById: true,
             createdAt: true,
             updatedAt: true,
+            workspace: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+            createdBy: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                avatar: {
+                  select: {
+                    path: true,
+                    id: true,
+                    fileId: true,
+                  },
+                },
+              },
+            },
           },
         });
       },
@@ -167,7 +189,7 @@ export class DocumentsRepository {
       cacheKey,
       60,
       async () => {
-        await this.prisma.document.findMany({
+        return await this.prisma.document.findMany({
           where: {
             status: DocumentStatus.ACTIVE,
             title: {
@@ -275,20 +297,43 @@ export class DocumentsRepository {
           },
         });
 
-        const snapshot: Bytes = Uint8Array.from(
-          createDocumentSnapshot({
-            title: doc.title,
-            content: doc.content,
-          }),
+        const snapshot: Bytes = new TextEncoder().encode(
+          JSON.stringify(
+            createDocumentSnapshot({
+              title: doc.title,
+              content: (doc.content ?? {
+                text: { text: '', richText: {} },
+              }) as Parameters<typeof createDocumentSnapshot>[0]['content'],
+            }),
+          ),
         );
 
-        await tx.version.create({
+        const version = await tx.version.create({
           data: {
             documentId: doc.id,
             versionNumber: 1,
             snapshot,
             createdById: userId,
             message: 'Initial version',
+          },
+          select: {
+            id: true,
+            versionNumber: true,
+          },
+        });
+
+        await tx.activity.create({
+          data: {
+            type: 'DOCUMENT_CREATED',
+            actorId: userId,
+            workspaceId,
+            documentId: doc.id,
+            versionId: version.id,
+            metadata: {
+              documentTitle: doc.title,
+              versionNumber: version.versionNumber,
+              versionMessage: 'Initial version',
+            },
           },
         });
 
@@ -329,6 +374,7 @@ export class DocumentsRepository {
 
   async update(
     documentId: UUID,
+    userId: UUID,
     data: { title?: string; content?: Prisma.InputJsonValue },
   ) {
     try {
@@ -411,20 +457,43 @@ export class DocumentsRepository {
 
           const nextVersionNumber = (latestVersion?.versionNumber ?? 0) + 1;
 
-          const snapshot: Bytes = Uint8Array.from(
-            createDocumentSnapshot({
-              title: updatedDocument.title,
-              content: updatedDocument.content,
-            }),
+          const snapshot: Bytes = new TextEncoder().encode(
+            JSON.stringify(
+              createDocumentSnapshot({
+                title: updatedDocument.title,
+                content: (updatedDocument.content ?? {
+                  text: { text: '', richText: {} },
+                }) as Parameters<typeof createDocumentSnapshot>[0]['content'],
+              }),
+            ),
           );
 
-          await tx.version.create({
+          const version = await tx.version.create({
             data: {
               documentId,
               versionNumber: nextVersionNumber,
               snapshot,
-              createdById: updatedDocument.createdById,
+              createdById: userId,
               message: 'Document updated',
+            },
+            select: {
+              id: true,
+              versionNumber: true,
+            },
+          });
+
+          await tx.activity.create({
+            data: {
+              type: 'DOCUMENT_UPDATED',
+              actorId: userId,
+              workspaceId: updatedDocument.workspaceId,
+              documentId: updatedDocument.id,
+              versionId: version.id,
+              metadata: {
+                documentTitle: updatedDocument.title,
+                versionNumber: version.versionNumber,
+                versionMessage: 'Document updated',
+              },
             },
           });
           return updatedDocument;
@@ -451,17 +520,35 @@ export class DocumentsRepository {
     }
   }
 
-  async archiveDocument(documentId: UUID) {
+  async archiveDocument(documentId: UUID, userId: UUID) {
     try {
-      const doc = await this.prisma.document.update({
-        where: {
-          id: documentId,
-          status: DocumentStatus.ACTIVE,
+      const doc = await this.prisma.$transaction(
+        async (tx: PrismaTransaction) => {
+          const updatedDocument = await tx.document.update({
+            where: {
+              id: documentId,
+              status: DocumentStatus.ACTIVE,
+            },
+            data: {
+              status: DocumentStatus.ARCHIVED,
+            },
+          });
+
+          await tx.activity.create({
+            data: {
+              type: 'DOCUMENT_ARCHIVED',
+              actorId: userId,
+              workspaceId: updatedDocument.workspaceId,
+              documentId: updatedDocument.id,
+              metadata: {
+                documentTitle: updatedDocument.title,
+              },
+            },
+          });
+
+          return updatedDocument;
         },
-        data: {
-          status: DocumentStatus.ARCHIVED,
-        },
-      });
+      );
 
       await this.invalidateWorkspaceDocumentCaches(doc.workspaceId as UUID);
 
@@ -498,17 +585,36 @@ export class DocumentsRepository {
     });
   }
 
-  async restoreDocument(documentId: UUID) {
+  async restoreDocument(documentId: UUID, userId: UUID) {
     try {
-      const doc = await this.prisma.document.update({
-        where: {
-          id: documentId,
-          status: DocumentStatus.ARCHIVED,
+      const doc = await this.prisma.$transaction(
+        async (tx: PrismaTransaction) => {
+          const updatedDocument = await tx.document.update({
+            where: {
+              id: documentId,
+              status: DocumentStatus.ARCHIVED,
+            },
+            data: {
+              status: DocumentStatus.ACTIVE,
+            },
+          });
+
+          await tx.activity.create({
+            data: {
+              type: 'DOCUMENT_RESTORED',
+              actorId: userId,
+              workspaceId: updatedDocument.workspaceId,
+              documentId: updatedDocument.id,
+              metadata: {
+                documentTitle: updatedDocument.title,
+                source: 'ARCHIVE',
+              },
+            },
+          });
+
+          return updatedDocument;
         },
-        data: {
-          status: DocumentStatus.ACTIVE,
-        },
-      });
+      );
 
       await this.invalidateWorkspaceDocumentCaches(doc.workspaceId as UUID);
 
@@ -529,17 +635,37 @@ export class DocumentsRepository {
     }
   }
 
-  async softDeleteDocument(documentId: UUID) {
+  async softDeleteDocument(documentId: UUID, userId: UUID) {
     try {
-      const doc = await this.prisma.document.update({
-        where: {
-          id: documentId,
-          status: DocumentStatus.ACTIVE,
+      const doc = await this.prisma.$transaction(
+        async (tx: PrismaTransaction) => {
+          const updatedDocument = await tx.document.update({
+            where: {
+              id: documentId,
+              status: DocumentStatus.ACTIVE,
+            },
+            data: {
+              status: DocumentStatus.DELETED,
+              deletedAt: new Date(),
+            },
+          });
+
+          await tx.activity.create({
+            data: {
+              type: 'DOCUMENT_DELETED',
+              actorId: userId,
+              workspaceId: updatedDocument.workspaceId,
+              documentId: updatedDocument.id,
+              metadata: {
+                documentTitle: updatedDocument.title,
+                source: 'TRASH',
+              },
+            },
+          });
+
+          return updatedDocument;
         },
-        data: {
-          status: DocumentStatus.DELETED,
-        },
-      });
+      );
 
       await this.invalidateWorkspaceDocumentCaches(doc.workspaceId as UUID);
 
@@ -647,13 +773,47 @@ export class DocumentsRepository {
 
           if (!requestedVersion) {
             throw new AppException({
+              code: 'NOT_FOUND',
+              message: 'version not found!',
+              status: HttpStatus.NOT_FOUND,
+            });
+          }
+
+          const snapshot = parseDocumentSnapshot(requestedVersion.snapshot);
+
+          const snapshotBytes = Buffer.from(JSON.stringify(snapshot), 'utf8');
+
+          if (!requestedVersion) {
+            throw new AppException({
               code: 'DOCUMENT_VERSION_NOT_FOUND',
               message: 'Document version not found.',
               status: HttpStatus.NOT_FOUND,
             });
           }
 
-          const snapshot = parseDocumentSnapshot(requestedVersion.snapshot);
+          const richText =
+            snapshot.content === null
+              ? { type: 'doc', content: [] }
+              : (
+                  snapshot.content as {
+                    text?: {
+                      richText?: Record<string, unknown>;
+                    };
+                  }
+                ).text?.richText;
+
+          if (
+            !richText ||
+            typeof richText !== 'object' ||
+            richText.type !== 'doc'
+          ) {
+            throw new AppException({
+              code: 'INVALID_DOCUMENT_SNAPSHOT',
+              message:
+                'The requested version contains invalid document content.',
+              status: HttpStatus.INTERNAL_SERVER_ERROR,
+            });
+          }
 
           const updatedDocument = await tx.document.update({
             where: {
@@ -678,6 +838,12 @@ export class DocumentsRepository {
             },
           });
 
+          await this.yjsPersistenceService.replaceDocumentState(
+            tx,
+            documentId,
+            richText,
+          );
+
           const latestVersion = await tx.version.findFirst({
             where: { documentId },
             orderBy: { versionNumber: 'desc' },
@@ -686,20 +852,48 @@ export class DocumentsRepository {
 
           const nextVersionNumber = (latestVersion?.versionNumber ?? 0) + 1;
 
-          const newSnapshot: Bytes = Uint8Array.from(
-            createDocumentSnapshot({
-              title: updatedDocument.title,
-              content: updatedDocument.content,
-            }),
+          const newSnapshot: Bytes = Buffer.from(
+            JSON.stringify(
+              createDocumentSnapshot({
+                title: updatedDocument.title,
+                content: updatedDocument.content as {
+                  text: {
+                    text: string;
+                    richText: Record<string, unknown>;
+                  };
+                },
+              }),
+            ),
+            'utf8',
           );
 
-          await tx.version.create({
+          const version = await tx.version.create({
             data: {
               documentId,
               versionNumber: nextVersionNumber,
               snapshot: newSnapshot,
               createdById: userId,
               message: `Restored version V${versionNumber}`,
+            },
+            select: {
+              id: true,
+              versionNumber: true,
+            },
+          });
+
+          await tx.activity.create({
+            data: {
+              type: 'VERSION_RESTORED',
+              actorId: userId,
+              workspaceId: updatedDocument.workspaceId,
+              documentId: updatedDocument.id,
+              versionId: version.id,
+              metadata: {
+                documentTitle: updatedDocument.title,
+                versionNumber: version.versionNumber,
+                restoredFromVersion: versionNumber,
+                versionMessage: `Restored version V${versionNumber}`,
+              },
             },
           });
 
@@ -726,5 +920,249 @@ export class DocumentsRepository {
 
       throw error;
     }
+  }
+
+  async recordView(userId: UUID, documentId: UUID) {
+    return this.prisma.documentView.upsert({
+      where: {
+        userId_documentId: {
+          userId,
+          documentId,
+        },
+      },
+      create: {
+        userId,
+        documentId,
+        lastViewedAt: new Date(),
+      },
+      update: {
+        lastViewedAt: new Date(),
+      },
+    });
+  }
+
+  async findRecent(userId: UUID, limit = 20) {
+    return this.prisma.documentView.findMany({
+      where: {
+        userId,
+        document: {
+          status: 'ACTIVE',
+          workspace: {
+            members: {
+              some: { userId },
+            },
+          },
+        },
+      },
+      select: {
+        lastViewedAt: true,
+        document: {
+          select: {
+            id: true,
+            title: true,
+            workspace: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+            updatedAt: true,
+            createdById: true,
+          },
+        },
+      },
+      orderBy: {
+        lastViewedAt: 'desc',
+      },
+      take: limit,
+    });
+  }
+
+  async star(userId: UUID, documentId: UUID) {
+    return this.prisma.starredDocument.upsert({
+      where: { userId_documentId: { userId, documentId } },
+      create: { userId, documentId },
+      update: {},
+    });
+  }
+
+  async unstar(userId: UUID, documentId: UUID) {
+    return this.prisma.starredDocument.deleteMany({
+      where: { userId, documentId },
+    });
+  }
+
+  async findStarred(userId: UUID) {
+    return this.prisma.starredDocument.findMany({
+      where: {
+        userId,
+        document: {
+          status: 'ACTIVE',
+          workspace: { members: { some: { userId } } },
+        },
+      },
+      select: {
+        createdAt: true,
+        document: {
+          select: {
+            id: true,
+            title: true,
+            workspace: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+            updatedAt: true,
+            createdById: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async isStarred(userId: UUID, documentId: UUID) {
+    const starred = await this.prisma.starredDocument.findUnique({
+      where: { userId_documentId: { userId, documentId } },
+      select: { id: true },
+    });
+    return Boolean(starred);
+  }
+
+  async findDeletedDocuments(userId: UUID) {
+    return this.prisma.document.findMany({
+      where: {
+        status: 'DELETED',
+        workspace: {
+          members: {
+            some: { userId },
+          },
+        },
+      },
+      select: {
+        id: true,
+        title: true,
+        workspaceId: true,
+        status: true,
+        deletedAt: true,
+        updatedAt: true,
+        createdById: true,
+        workspace: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+      orderBy: {
+        deletedAt: 'desc',
+      },
+    });
+  }
+
+  async findDeletedDocument(documentId: UUID) {
+    return this.prisma.document.findFirst({
+      where: {
+        id: documentId,
+        status: 'DELETED',
+      },
+      select: {
+        id: true,
+        workspaceId: true,
+        status: true,
+      },
+    });
+  }
+
+  async permanentlyDeleteDocument(documentId: UUID, userId: UUID) {
+    const deletedDocument = await this.prisma.$transaction(
+      async (tx: PrismaTransaction) => {
+        // Capture document details before physical deletion.
+        const document = await tx.document.findFirst({
+          where: {
+            id: documentId,
+            status: DocumentStatus.DELETED,
+          },
+          select: {
+            id: true,
+            workspaceId: true,
+            title: true,
+          },
+        });
+
+        if (!document) {
+          throw new AppException({
+            code: 'DOCUMENT_NOT_FOUND',
+            message: 'Document not found.',
+            status: HttpStatus.NOT_FOUND,
+          });
+        }
+
+        // Preserve the activity record independently of the document.
+        await tx.activity.create({
+          data: {
+            type: 'DOCUMENT_PERMANENTLY_DELETED',
+            actorId: userId,
+            workspaceId: document.workspaceId,
+            documentId: document.id,
+            metadata: {
+              documentTitle: document.title,
+              source: 'TRASH',
+            },
+          },
+        });
+
+        // Physically delete only after recording the activity.
+        return tx.document.delete({
+          where: {
+            id: document.id,
+            status: DocumentStatus.DELETED,
+          },
+        });
+      },
+    );
+
+    await this.invalidateWorkspaceDocumentCaches(
+      deletedDocument.workspaceId as UUID,
+    );
+
+    return deletedDocument;
+  }
+
+  async restoreDeletedDocument(documentId: UUID, userId: UUID) {
+    const result = await this.prisma.$transaction(
+      async (tx: PrismaTransaction) => {
+        const updatedDocument = await tx.document.update({
+          where: {
+            id: documentId,
+            status: DocumentStatus.DELETED,
+          },
+          data: {
+            status: DocumentStatus.ACTIVE,
+            deletedAt: null,
+          },
+        });
+
+        await tx.activity.create({
+          data: {
+            type: 'DOCUMENT_RESTORED',
+            actorId: userId,
+            workspaceId: updatedDocument.workspaceId,
+            documentId: updatedDocument.id,
+            metadata: {
+              documentTitle: updatedDocument.title,
+              source: 'TRASH',
+            },
+          },
+        });
+
+        return updatedDocument;
+      },
+    );
+
+    await this.invalidateWorkspaceDocumentCaches(result.workspaceId as UUID);
+
+    return result;
   }
 }

@@ -24,6 +24,8 @@ import { WorkspaceRoleGuard } from '../common/guards/workspace-role.guard.js';
 import { Roles } from '../common/decorators/role.decorator.js';
 import { AppException } from '../common/exceptions/app.exception.js';
 import { ResponseMessage } from '../common/decorators/response-message.decorator.js';
+import { CreateWorkspaceInvitationDto } from './dto/create-workspace-invitation.dto.js';
+import { AcceptWorkspaceInvitationDto } from './dto/workspace-invite.dto.js';
 
 interface AuthenticatedRequest extends Request {
   user: {
@@ -48,16 +50,13 @@ export class WorkspacesController {
 
   @Post()
   @ResponseMessage('Workspace created successfully.')
-  create(
-    @Req() req: AuthenticatedRequest,
-    @Body() dto: CreateWorkspaceDto,
-  ) {
+  create(@Req() req: AuthenticatedRequest, @Body() dto: CreateWorkspaceDto) {
     return this.workspacesService.create(req.user.userId, dto);
   }
 
   @Get()
   @ResponseMessage('Workspaces retrieved successfully.')
-  findMine(@Req() req: AuthenticatedRequest,) {
+  findMine(@Req() req: AuthenticatedRequest) {
     return this.workspacesService.findMine(req.user.userId);
   }
 
@@ -74,7 +73,7 @@ export class WorkspacesController {
 
   @Patch(':workspaceId')
   @UseGuards(WorkspaceRoleGuard)
-  @Roles(WorkspaceRole.OWNER,WorkspaceRole.ADMIN)
+  @Roles(WorkspaceRole.OWNER, WorkspaceRole.ADMIN)
   @ResponseMessage('Workspace updated successfully.')
   update(
     @Param('workspaceId') workspaceId: string,
@@ -99,18 +98,90 @@ export class WorkspacesController {
     return this.workspacesService.remove(workspaceId, req.user.userId);
   }
 
-  @Post(':workspaceId/members')
+  // @Post(':workspaceId/members')
+  // @UseGuards(WorkspaceRoleGuard)
+  // @Roles(WorkspaceRole.OWNER, WorkspaceRole.ADMIN)
+  // @ResponseMessage('Workspace member added successfully.')
+  // addMember(
+  //   @Param('workspaceId') workspaceId: string,
+  //   @Req() req: AuthenticatedRequest,
+  //   @Body() dto: AddMemberDto,
+  // ) {
+  //   this.validateUuid(workspaceId, 'Workspace ID');
+
+  //   return this.workspacesService.addMember(workspaceId, req.user.userId, dto);
+  // }
+
+  // temporary
+  @Post(':workspaceId/invitations')
   @UseGuards(WorkspaceRoleGuard)
   @Roles(WorkspaceRole.OWNER, WorkspaceRole.ADMIN)
-  @ResponseMessage('Workspace member added successfully.')
-  addMember(
+  @ResponseMessage('Workspace invitation created successfully.')
+  createInvitation(
     @Param('workspaceId') workspaceId: string,
     @Req() req: AuthenticatedRequest,
-    @Body() dto: AddMemberDto,
+    @Body() dto: CreateWorkspaceInvitationDto,
   ) {
     this.validateUuid(workspaceId, 'Workspace ID');
 
-    return this.workspacesService.addMember(workspaceId, req.user.userId, dto);
+    return this.workspacesService.createInvitation(
+      workspaceId,
+      req.user.userId,
+      dto,
+    );
+  }
+
+  @Post('invitations/accept')
+  @ResponseMessage('Workspace invitation accepted successfully.')
+  acceptInvitation(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: AcceptWorkspaceInvitationDto,
+  ) {
+    return this.workspacesService.acceptInvitation(dto.token, req.user.userId);
+  }
+
+  @Delete(':workspaceId/invitations/:invitationId')
+  @UseGuards(WorkspaceRoleGuard)
+  @Roles(WorkspaceRole.OWNER, WorkspaceRole.ADMIN)
+  @ResponseMessage('Workspace invitation revoked successfully.')
+  revokeInvitation(
+    @Param('workspaceId') workspaceId: string,
+    @Param('invitationId') invitationId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    this.validateUuid(workspaceId, 'Workspace ID');
+    this.validateUuid(invitationId, 'Invitation ID');
+
+    return this.workspacesService.revokeInvitation(
+      workspaceId,
+      invitationId,
+      req.user.userId,
+    );
+  }
+
+  @Post('invitations/reject')
+  @ResponseMessage('Workspace invitation rejected successfully.')
+  rejectInvitation(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: AcceptWorkspaceInvitationDto,
+  ) {
+    return this.workspacesService.rejectInvitation(dto.token, req.user.userId);
+  }
+
+  @Get(':workspaceId/invitations')
+  @UseGuards(WorkspaceRoleGuard)
+  @Roles(WorkspaceRole.OWNER, WorkspaceRole.ADMIN)
+  @ResponseMessage('Workspace invitations retrieved successfully.')
+  getWorkspaceInvitations(
+    @Param('workspaceId') workspaceId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    this.validateUuid(workspaceId, 'Workspace ID');
+
+    return this.workspacesService.getWorkspaceInvitations(
+      workspaceId,
+      req.user.userId,
+    );
   }
 
   @Patch(':workspaceId/members/:userId')

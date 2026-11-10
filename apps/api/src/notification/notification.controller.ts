@@ -17,7 +17,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { type AuthenticatedUser } from '../common/decorators/current-user.decorator.js';
 import { ResponseMessage } from '../common/decorators/response-message.decorator.js';
 
-@Controller('notification')
+@Controller('notifications')
 @UseGuards(JwtAuthGuard)
 export class NotificationController {
   constructor(private readonly notificationService: NotificationService) {}
@@ -38,7 +38,7 @@ export class NotificationController {
     );
   }
 
-  @Get('unread-count')
+  @Get('unread/count')
   @ResponseMessage('Unread notification retrieved successfully!.')
   getUnreadCount(@CurrentUser() user: AuthenticatedUser) {
     return this.notificationService.getUnreadCount(user.userId);
@@ -53,7 +53,7 @@ export class NotificationController {
     return this.notificationService.markAsRead(notificationId, user.userId);
   }
 
-  @Patch('read-all')
+  @Patch('read/all')
   @ResponseMessage('Mark all Notification read successfully!.')
   markAllAsRead(@CurrentUser() user: AuthenticatedUser) {
     return this.notificationService.markAllAsRead(user.userId);

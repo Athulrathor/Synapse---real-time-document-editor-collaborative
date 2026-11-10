@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { NotificationService } from './notification.service.js';
 import { NotificationController } from './notification.controller.js';
 import { RedisModule } from '../common/redis/redis.module.js';
@@ -11,14 +11,20 @@ import { DocumentCreatedListener } from './events/document-created.listener.js';
 import { WorkspacesModule } from '../workspaces/workspaces.module.js';
 
 @Module({
-  imports: [RedisModule,UsersModule,JwtModule,AuthModule,WorkspacesModule],
+  imports: [
+    RedisModule,
+    UsersModule,
+    JwtModule,
+    AuthModule,
+    forwardRef(() => WorkspacesModule),
+  ],
   controllers: [NotificationController],
   providers: [
     NotificationService,
     NotificationRepository,
     NotificationCacheRepository,
-    DocumentCreatedListener
+    DocumentCreatedListener,
   ],
-  exports: [NotificationService],
+  exports: [NotificationService, NotificationRepository],
 })
 export class NotificationModule {}

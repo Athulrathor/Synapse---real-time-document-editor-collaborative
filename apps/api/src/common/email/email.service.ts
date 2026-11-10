@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { WorkspaceRole } from '@prisma/client';
 import * as nodemailer from 'nodemailer';
 
 @Injectable()
@@ -153,5 +154,83 @@ export class EmailService {
 
       return entities[char]!;
     });
+  }
+
+  async sendWorkspaceInvitationEmail(
+    email: string,
+    workspaceName: string,
+    inviterName: string,
+    role: WorkspaceRole,
+    token: string,
+    expiresAt: string,
+  ): Promise<void> {
+    const frontendUrl =
+      this.configService.get<string>('app.frontendUrl') ??
+      'http://localhost:3000';
+
+    const invitationUrl = new URL('/invitations', frontendUrl);
+    invitationUrl.searchParams.set('token', token);
+
+    const safeWorkspaceName = this.escapeHtml(workspaceName);
+    const safeInviterName = this.escapeHtml(inviterName);
+    const safeRole = this.escapeHtml(role);
+    const safeInvitationUrl = this.escapeHtml(invitationUrl.toString());
+
+    const expiryDate = new Date(expiresAt);
+    const formattedExpiry = Number.isNaN(expiryDate.getTime())
+      ? 'within 7 days'
+      : expiryDate.toLocaleString('en-IN', {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+          timeZone: 'Asia/Kolkata',
+        });
+
+    await this.transporter.sendMail({
+      from: this.configService.get<string>('email.from'),
+      to: email,
+      subject: `Invitation to join ${workspaceName} on Synapse Workspace`,
+      text: [
+        `Hi,`,
+        '',
+        `${inviterName} has invited you to join "${workspaceName}" on Synapse Workspace.`,
+        `Your assigned role is: ${role}.`,
+        '',
+        `Accept your invitation: ${invitationUrl.toString()}`,
+        '',
+        `This invitation expires on ${formattedExpiry}.`,
+        'If you were not expecting this invitation, you can ignore this email.',
+        '',
+        'Synapse Workspace',
+      ].join('\n'),
+      html: `
+      <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#222">
+        <h2>You're invited to collaborate!</h2>
+
+        <p>
+          <strong>${safeInviterName}</strong> has invited you to join
+          <strong>${safeWorkspaceName}</strong> on Synapse Workspace.
+        </p>
+
+        <p>Your assigned role: <strong>${safeRole}</strong></p>
+
+        <div style="margin:28px 0">
+          <a
+            href="${safeInvitationUrl}"
+            style="display:inline-block;padding:12px 24px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold"
+          >
+            Accept Invitation
+          </a>
+        </div>
+
+        <p>This invitation expires on ${this.escapeHtml(formattedExpiry)}.</p>
+
+        <p>If you weren't expecting this invitation, you can safely ignore this email.</p>
+
+        <p style="font-size:12px;color:#666">Synapse Workspace</p>
+      </div>
+    `,
+    });
+
+    this.logger.log(`Workspace invitation email sent to ${email}`);
   }
 }

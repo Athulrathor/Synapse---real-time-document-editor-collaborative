@@ -32,22 +32,25 @@ import {
 
 import { AppException } from '../common/exceptions/app.exception.js';
 
-import {type Express, type Request, type Response } from 'express';
+import { type Express, type Request, type Response } from 'express';
 import { VerifyPasswordResetOtpDto } from './dto/otp-verification.dto.js';
 import { ForgotPasswordDto } from './dto/forget-password.dto.js';
 import { ResetPasswordDto } from './dto/reset-password.dto.js';
 import { EmailQueue } from '../jobs/email/email.queue.js';
 
-import { AuthGuard } from '@nestjs/passport';
-import type { GoogleUserProfile } from './strategies/google.strategy.js';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ResponseMessage } from '../common/decorators/response-message.decorator.js';
+import { ConfigService } from '@nestjs/config';
+import { GoogleUserProfile } from './strategies/google.strategy.js';
+import { GoogleAuthGuard } from './strategies/google-auth-oauth.guard.js';
+import { ChangePasswordDto } from './dto/change-password-dto.js';
 
 @Controller('auth')
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly emailQueue: EmailQueue,
+    private readonly configService: ConfigService,
   ) {}
 
   @Post('register')
@@ -59,13 +62,13 @@ export class AuthController {
       new ParseFilePipe({
         validators: [
           new MaxFileSizeValidator({
-            maxSize: 2 * 1024 * 1024,
+            maxSize: 5 * 1024 * 1024,
           }),
           new FileTypeValidator({
             fileType: /^image\/(jpeg|png|webp)$/,
           }),
         ],
-        fileIsRequired: true,
+        fileIsRequired: false,
       }),
     )
     avatar: Express.Multer.File,
@@ -142,7 +145,9 @@ export class AuthController {
     return {
       user: {
         id: user.userId,
+        name: user.name,
         email: user.email,
+        avatar: user.avatar,
       },
     };
   }
@@ -154,10 +159,10 @@ export class AuthController {
     @Body() dto: RefreshTokenDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<Omit<RefreshTokenResponseDto, 'refreshToken'>> {
-    const refreshToken = req.cookies?.refresh_token || dto.refreshToken;
+  ): Promise<RefreshTokenResponseDto> {
+    const token = req.cookies?.refresh_token || dto.refreshToken;
 
-    if (!refreshToken) {
+    if (!token) {
       throw new AppException({
         code: 'REFRESH_TOKEN_MISSING',
         message: 'Refresh token is required.',
@@ -166,7 +171,7 @@ export class AuthController {
     }
 
     const result = await this.authService.refreshToken({
-      refreshToken,
+      refreshToken: token,
     });
 
     res.cookie('refresh_token', result.refreshToken, {
@@ -179,6 +184,7 @@ export class AuthController {
 
     return {
       accessToken: result.accessToken,
+      user: result.user,
     };
   }
 
@@ -225,9 +231,30 @@ export class AuthController {
     return result;
   }
 
+  @Post('change/password')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  @ResponseMessage('Password changed successfully. Please log in again.')
+  async changePassword(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ChangePasswordDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    await this.authService.changePassword(user.userId, dto);
+
+    res.clearCookie('refresh_token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/api/v1/auth',
+    });
+  }
+
   @Post('forgot/password')
   @HttpCode(HttpStatus.OK)
-  @ResponseMessage('If an account exists with that email, password reset instructions will be sent.')
+  @ResponseMessage(
+    'If an account exists with that email, password reset instructions will be sent.',
+  )
   forgotPassword(@Body() dto: ForgotPasswordDto) {
     return this.authService.forgetPassword(dto);
   }
@@ -247,62 +274,90 @@ export class AuthController {
   }
 
   @Get('google')
-  @UseGuards(AuthGuard('google'))
+  @UseGuards(GoogleAuthGuard)
   @ResponseMessage('Redirecting google login page.')
-  googleLogin(): void {
-    // Passport redirects the user to Google.
-  }
+  googleLogin(): void {}
 
   @Get('google/callback')
-  @ResponseMessage('Google login successful.')
-  @UseGuards(AuthGuard('google'))
+  @UseGuards(GoogleAuthGuard)
   async googleCallback(
     @Req() req: Request & { user: GoogleUserProfile },
     @Res() res: Response,
   ) {
-    const userAgent = req.headers['user-agent'] || '';
+    const frontendUrl = this.configService.get<string>('app.frontendUrl');
 
-    let deviceName = 'Unknown Device';
-
-    if (/iphone/i.test(userAgent)) {
-      deviceName = 'iPhone';
-    } else if (/ipad/i.test(userAgent)) {
-      deviceName = 'iPad';
-    } else if (/android/i.test(userAgent)) {
-      deviceName = 'Android Device';
-    } else if (/macintosh/i.test(userAgent)) {
-      deviceName = 'Macintosh (Mac)';
-    } else if (/windows/i.test(userAgent)) {
-      deviceName = 'Windows PC';
-    } else if (/linux/i.test(userAgent)) {
-      deviceName = 'Linux PC';
+    if (!frontendUrl) {
+      throw new AppException({
+        code: 'GOOGLE_FAILED',
+        status: HttpStatus.INTERNAL_SERVER_ERROR,
+        message: 'Google OAuth configuration is missing.',
+      });
     }
 
-    const forwardedFor = req.headers['x-forwarded-for'];
-    const ipAddress =
-      req.ip ||
-      (typeof forwardedFor === 'string'
-        ? forwardedFor.split(',')[0].trim()
-        : '');
+    try {
+      const userAgent = req.headers['user-agent'] || '';
 
-    const result = await this.authService.loginWithGoogle(
-      req.user,
-      ipAddress,
-      userAgent,
-      deviceName,
-    );
+      let deviceName = 'Unknown Device';
 
-    res.cookie('refresh_token', result.refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-      path: '/api/v1/auth',
-    });
+      if (/iphone/i.test(userAgent)) {
+        deviceName = 'iPhone';
+      } else if (/ipad/i.test(userAgent)) {
+        deviceName = 'iPad';
+      } else if (/android/i.test(userAgent)) {
+        deviceName = 'Android Device';
+      } else if (/macintosh/i.test(userAgent)) {
+        deviceName = 'Macintosh (Mac)';
+      } else if (/windows/i.test(userAgent)) {
+        deviceName = 'Windows PC';
+      } else if (/linux/i.test(userAgent)) {
+        deviceName = 'Linux PC';
+      }
 
-    return res.status(HttpStatus.OK).json({
-      accessToken: result.accessToken,
-      user: result.user,
-    });
+      const forwardedFor = req.headers['x-forwarded-for'];
+      const ipAddress =
+        req.ip ||
+        (typeof forwardedFor === 'string'
+          ? forwardedFor.split(',')[0].trim()
+          : '');
+
+      const result = await this.authService.loginWithGoogle(
+        req.user,
+        ipAddress,
+        userAgent,
+        deviceName,
+      );
+
+      res.cookie('refresh_token', result.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 30 * 24 * 60 * 60 * 1000,
+        path: '/api/v1/auth',
+      });
+
+      const redirectUrl = new URL('/google/callback', frontendUrl);
+
+      redirectUrl.searchParams.set('status', 'success');
+
+      res.redirect(redirectUrl.toString());
+    } catch (error: unknown) {
+      console.error(
+        'Google login failed',
+        error instanceof Error ? error.stack : String(error),
+      );
+
+      const redirectUrl = new URL('/google/callback', frontendUrl);
+
+      const reason =
+        error instanceof AppException &&
+        error.getStatus() === HttpStatus.CONFLICT
+          ? 'google_account_link_required'
+          : 'google_login_failed';
+
+      redirectUrl.searchParams.set('status', 'error');
+      redirectUrl.searchParams.set('reason', reason);
+
+      return res.redirect(redirectUrl.toString());
+    }
   }
 }

@@ -35,23 +35,21 @@ async function bootstrap() {
 
   const configService = app.get(ConfigService);
 
-  app.useGlobalInterceptors(
-  new ResponseInterceptor(app.get(Reflector)),
-);
+  app.useGlobalInterceptors(new ResponseInterceptor(app.get(Reflector)));
   app.useGlobalFilters(new GlobalExceptionFilter());
-  
+
   app.setGlobalPrefix('api/v1');
 
   app.enableCors({
-    origin: configService.get<string>(
-      'app.corsOrigin',
+    origin: [
+      configService.get<string>('app.corsOrigin'),
       'http://localhost:3000',
-    ),
+    ],
     credentials: true,
   });
 
   const port = configService.get('app.port', 4000) as number;
 
-  await app.listen(process.env.PORT ?? 4000,'0.0.0.0');
+  await app.listen(process.env.PORT ?? 4000);
 }
 await bootstrap();

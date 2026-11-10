@@ -6,6 +6,7 @@ import { RedisService } from '../../common/redis/redis.service.js';
 
 @Injectable()
 export class AuthRepository {
+  private readonly googleOAuthExchangeTtlSeconds = 60;
   constructor(
     private readonly prisma: PrismaService,
     private readonly redisService: RedisService,
@@ -52,6 +53,17 @@ export class AuthRepository {
 
       return auth;
     });
+  }
+
+  async findPasswordHash(userId: string): Promise<string | null> {
+    const auth = await this.prisma.userAuth.findUnique({
+      where: { userId },
+      select: {
+        passwordHash: true,
+      },
+    });
+
+    return auth?.passwordHash ?? null;
   }
 
   async resetFailedLogins(userId: string) {
@@ -135,5 +147,34 @@ export class AuthRepository {
         tokenVersion: true,
       },
     });
+  }
+
+  async storeGoogleOAuthExchange<T>(
+    tokenHash: string,
+    payload: T,
+  ): Promise<void> {
+    const key = `auth:google-oauth-exchange:${tokenHash}`;
+
+    await this.redisService.setCache(
+      key,
+      payload,
+      this.googleOAuthExchangeTtlSeconds,
+    );
+  }
+
+  async consumeGoogleOAuthExchange<T>(tokenHash: string): Promise<T | null> {
+    const key = `auth:google-oauth-exchange:${tokenHash}`;
+
+    const raw = await this.redisService.getAndDelete(key);
+
+    if (!raw) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return null;
+    }
   }
 }

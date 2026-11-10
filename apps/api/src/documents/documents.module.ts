@@ -12,19 +12,20 @@ import { JwtModule } from '../common/jwt/jwt.module.js';
 import { UsersModule } from '../users/users.module.js';
 import { RedisService } from '../common/redis/redis.service.js';
 import { OutboxRepository } from '../jobs/outbox/outbox.repository.js';
+import { ActivityModule } from '../activity/activity.module.js';
+import { YjsPersistenceService } from '../collaboration/yjs/yjs-persistence.service.js';
 
 @Module({
-  imports: [WorkspacesModule, AuthModule, JwtModule,UsersModule],
+  imports: [WorkspacesModule, AuthModule, JwtModule, UsersModule,ActivityModule],
   controllers: [DocumentsController],
   providers: [
     DocumentsService,
     DocumentsRepository,
     DocumentRoleGuard,
-    WorkspacesRepository,
     RedisService,
-    OutboxRepository
+    OutboxRepository,
+    YjsPersistenceService
   ],
   exports: [DocumentsService],
 })
 export class DocumentsModule {}
-

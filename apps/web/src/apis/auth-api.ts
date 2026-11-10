@@ -7,20 +7,33 @@ import {
   VerifyEmailInput,
   VerifyOtpInput,
   ResetPasswordInput,
+  changePasswordInput,
 } from "@/types/auth.type";
+
+export interface CurrentUserResponse {
+  user: AuthUser;
+}
 
 export const authService = {
   login(input: LoginInput): Promise<AuthSessionResponse> {
     return apiRequest<AuthSessionResponse>(API_ENDPOINTS.auth.login, {
       method: "POST",
       json: input,
+      retryOnUnauthorized: false,
     });
   },
 
   register(formData: FormData): Promise<unknown> {
     return apiRequest<unknown>(API_ENDPOINTS.auth.register, {
       method: "POST",
-      body: formData,
+      json: formData,
+    });
+  },
+
+  changePassword(input: changePasswordInput): Promise<unknown> {
+    return apiRequest<unknown>(API_ENDPOINTS.auth.changePassword, {
+      method: "POST",
+      json: input,
     });
   },
 
@@ -35,11 +48,12 @@ export const authService = {
     return apiRequest<unknown>(API_ENDPOINTS.auth.verifyPasswordResetOtp, {
       method: "POST",
       json: input,
+      retryOnUnauthorized: false,
     });
   },
 
-  getMe(): Promise<AuthUser> {
-    return apiRequest<AuthUser>(API_ENDPOINTS.auth.me);
+  getMe(): Promise<CurrentUserResponse> {
+    return apiRequest<CurrentUserResponse>(API_ENDPOINTS.auth.me);
   },
 
   forgotPassword(email: string): Promise<unknown> {
@@ -59,6 +73,7 @@ export const authService = {
   refresh(): Promise<AuthSessionResponse> {
     return apiRequest<AuthSessionResponse>(API_ENDPOINTS.auth.refresh, {
       method: "POST",
+      retryOnUnauthorized: false,
     });
   },
 

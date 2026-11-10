@@ -14,17 +14,19 @@ import {
 } from '@nestjs/common';
 
 import type { Request } from 'express';
+import { UUID } from 'crypto';
+import { WorkspaceRole } from '@prisma/client';
 
 import { DocumentsService } from './documents.service.js';
 import { CreateDocumentDto } from './dto/create-document.dto.js';
 import { UpdateDocumentDto } from './dto/update-document.dto.js';
-import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
-import { UUID } from 'crypto';
 import { ListDocumentsQueryDto } from './dto/list-documents-query.dto.js';
-import { WorkspaceRole } from '@prisma/client';
+
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import { WorkspaceRoleGuard } from '../common/guards/workspace-role.guard.js';
-import { Roles } from '../common/decorators/role.decorator.js';
 import { DocumentRoleGuard } from '../common/guards/document-role.guard.js';
+
+import { Roles } from '../common/decorators/role.decorator.js';
 import { ResponseMessage } from '../common/decorators/response-message.decorator.js';
 import { AppException } from '../common/exceptions/app.exception.js';
 
@@ -38,6 +40,32 @@ interface AuthenticatedRequest extends Request {
 @UseGuards(JwtAuthGuard)
 export class DocumentsController {
   constructor(private readonly documentsService: DocumentsService) {}
+
+  // ─────────────────────────────────────────────
+  // Static GET routes
+  // ─────────────────────────────────────────────
+
+  @Get('search')
+  @ResponseMessage('Documents searched successfully.')
+  search(@Req() req: AuthenticatedRequest, @Query('q') q: string = '') {
+    return this.documentsService.search(req.user.userId as UUID, q);
+  }
+
+  @Get('recent')
+  @ResponseMessage('Recently viewed documents retrieved successfully.')
+  findRecentlyViewed(@Req() req: AuthenticatedRequest) {
+    return this.documentsService.findRecentlyViewed(req.user.userId as UUID);
+  }
+
+  @Get('starred')
+  @ResponseMessage('Starred documents retrieved successfully.')
+  findStarredDocuments(@Req() req: AuthenticatedRequest) {
+    return this.documentsService.findStarredDocuments(req.user.userId as UUID);
+  }
+
+  // ─────────────────────────────────────────────
+  // Workspace document routes
+  // ─────────────────────────────────────────────
 
   @Post(':workspaceId/documents')
   @UseGuards(WorkspaceRoleGuard)
@@ -77,6 +105,16 @@ export class DocumentsController {
     );
   }
 
+  @Get('trash')
+  @ResponseMessage('Trash documents retrieved successfully.')
+  findDeletedDocuments(@Req() req: AuthenticatedRequest) {
+    return this.documentsService.findDeletedDocuments(req.user.userId as UUID);
+  }
+
+  // ─────────────────────────────────────────────
+  // Document-specific GET route
+  // ─────────────────────────────────────────────
+
   @Get(':documentId')
   @UseGuards(DocumentRoleGuard)
   @Roles(
@@ -96,11 +134,9 @@ export class DocumentsController {
     );
   }
 
-  @Get('search')
-  @ResponseMessage('Documents searched successfully.')
-  search(@Req() req: AuthenticatedRequest, @Query('q') q: string = '') {
-    return this.documentsService.search(req.user.userId as UUID, q);
-  }
+  // ─────────────────────────────────────────────
+  // Document-specific mutations
+  // ─────────────────────────────────────────────
 
   @Patch(':documentId')
   @UseGuards(DocumentRoleGuard)
@@ -117,6 +153,100 @@ export class DocumentsController {
       dto,
     );
   }
+
+  @Patch(':documentId/trash/restore')
+  @ResponseMessage('Document restored from trash successfully.')
+  restoreDeletedDocument(
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.documentsService.restoreDeletedDocument(
+      documentId as UUID,
+      req.user.userId as UUID,
+    );
+  }
+
+  @Delete(':documentId/permanent')
+  @ResponseMessage('Document permanently deleted successfully.')
+  permanentlyDeleteDocument(
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.documentsService.permanentlyDeleteDocument(
+      documentId as UUID,
+      req.user.userId as UUID,
+    );
+  }
+
+  @Post(':documentId/star')
+  @ResponseMessage('Document starred successfully.')
+  starDocument(
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.documentsService.starDocument(
+      req.user.userId as UUID,
+      documentId as UUID,
+    );
+  }
+
+  @Delete(':documentId/star')
+  @ResponseMessage('Document unstarred successfully.')
+  unstarDocument(
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.documentsService.unstarDocument(
+      req.user.userId as UUID,
+      documentId as UUID,
+    );
+  }
+
+  @Patch(':documentId/archive')
+  @UseGuards(DocumentRoleGuard)
+  @Roles(WorkspaceRole.OWNER, WorkspaceRole.ADMIN)
+  @ResponseMessage('Document archived successfully.')
+  archive(
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.documentsService.archiveDocument(
+      documentId as UUID,
+      req.user.userId as UUID,
+    );
+  }
+
+  @Patch(':documentId/restore')
+  @UseGuards(DocumentRoleGuard)
+  @Roles(WorkspaceRole.OWNER, WorkspaceRole.ADMIN)
+  @ResponseMessage('Document restored successfully.')
+  restore(
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.documentsService.restore(
+      documentId as UUID,
+      req.user.userId as UUID,
+    );
+  }
+
+  @Delete(':documentId')
+  @UseGuards(DocumentRoleGuard)
+  @Roles(WorkspaceRole.OWNER, WorkspaceRole.ADMIN)
+  @ResponseMessage('Document deleted successfully.')
+  remove(
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.documentsService.remove(
+      documentId as UUID,
+      req.user.userId as UUID,
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // Document version routes
+  // ─────────────────────────────────────────────
 
   @Get(':documentId/versions')
   @UseGuards(DocumentRoleGuard)
@@ -159,48 +289,6 @@ export class DocumentsController {
     return this.documentsService.restoreVersion(
       documentId as UUID,
       versionNumber,
-      req.user.userId as UUID,
-    );
-  }
-
-  @Patch(':documentId/archive')
-  @UseGuards(DocumentRoleGuard)
-  @Roles(WorkspaceRole.OWNER, WorkspaceRole.ADMIN)
-  @ResponseMessage('Document archived successfully.')
-  archive(
-    @Param('documentId', ParseUUIDPipe) documentId: string,
-    @Req() req: AuthenticatedRequest,
-  ) {
-    return this.documentsService.archiveDocument(
-      documentId as UUID,
-      req.user.userId as UUID,
-    );
-  }
-
-  @Patch(':documentId/restore')
-  @UseGuards(DocumentRoleGuard)
-  @Roles(WorkspaceRole.OWNER, WorkspaceRole.ADMIN)
-  @ResponseMessage('Document restored successfully.')
-  restore(
-    @Param('documentId', ParseUUIDPipe) documentId: string,
-    @Req() req: AuthenticatedRequest,
-  ) {
-    return this.documentsService.restore(
-      documentId as UUID,
-      req.user.userId as UUID,
-    );
-  }
-
-  @Delete(':documentId')
-  @UseGuards(DocumentRoleGuard)
-  @Roles(WorkspaceRole.OWNER, WorkspaceRole.ADMIN)
-  @ResponseMessage('Document deleted successfully.')
-  remove(
-    @Param('documentId', ParseUUIDPipe) documentId: string,
-    @Req() req: AuthenticatedRequest,
-  ) {
-    return this.documentsService.remove(
-      documentId as UUID,
       req.user.userId as UUID,
     );
   }

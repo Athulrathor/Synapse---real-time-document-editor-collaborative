@@ -1,4 +1,3 @@
-
 import { Injectable } from '@nestjs/common';
 import { RedisService } from '../../common/redis/redis.service.js';
 import { AuthRepository } from './auth.repository.js';
@@ -21,7 +20,7 @@ export class SessionRepository {
 
   constructor(
     private readonly redisService: RedisService,
-    private readonly authRepository: AuthRepository
+    private readonly authRepository: AuthRepository,
   ) {}
 
   private sessionKey(sessionId: string): string {
@@ -33,31 +32,31 @@ export class SessionRepository {
   }
 
   private deserializeSession(raw: string): RedisSession {
-  const parsed = JSON.parse(raw) as Omit<
-    RedisSession,
-    'expiresAt' | 'revokedAt'
-  > & {
-    expiresAt: string | number | Date;
-    revokedAt: string | number | Date | null;
-  };
+    const parsed = JSON.parse(raw) as Omit<
+      RedisSession,
+      'expiresAt' | 'revokedAt'
+    > & {
+      expiresAt: string | number | Date;
+      revokedAt: string | number | Date | null;
+    };
 
-  const expiresAt = new Date(parsed.expiresAt);
-  const revokedAt =
-    parsed.revokedAt === null ? null : new Date(parsed.revokedAt);
+    const expiresAt = new Date(parsed.expiresAt);
+    const revokedAt =
+      parsed.revokedAt === null ? null : new Date(parsed.revokedAt);
 
-  if (
-    !Number.isFinite(expiresAt.getTime()) ||
-    (revokedAt !== null && !Number.isFinite(revokedAt.getTime()))
-  ) {
-    throw new Error('Invalid session date in Redis.');
+    if (
+      !Number.isFinite(expiresAt.getTime()) ||
+      (revokedAt !== null && !Number.isFinite(revokedAt.getTime()))
+    ) {
+      throw new Error('Invalid session date in Redis.');
+    }
+
+    return {
+      ...parsed,
+      expiresAt,
+      revokedAt,
+    };
   }
-
-  return {
-    ...parsed,
-    expiresAt,
-    revokedAt,
-  };
-}
 
   async create(data: {
     id: string;
@@ -143,9 +142,12 @@ export class SessionRepository {
     newTokenHash: string,
     expiresAt: Date,
   ): Promise<{ count: number }> {
-    const ttlSeconds = Math.floor((expiresAt.getTime() - Date.now()) / 1000);
+    const now = Date.now();
+    const ttlSeconds = Math.floor((expiresAt.getTime() - now) / 1000);
 
-    if (ttlSeconds <= 0) return { count: 0 };
+    if (ttlSeconds <= 0) {
+      return { count: 0 };
+    }
 
     const updated = await this.redisService.compareAndSetJsonField(
       this.sessionKey(sessionId),
@@ -153,25 +155,34 @@ export class SessionRepository {
       currentTokenHash,
       newTokenHash,
       ttlSeconds,
+      {
+        userId,
+        sessionId,
+        now,
+      },
     );
 
-    if (updated !== true) return { count: 0 };
+    if (!updated) {
+      const raw = await this.redisService.get(this.sessionKey(sessionId));
 
-    const raw = await this.redisService.get(this.sessionKey(sessionId));
+      if (!raw) {
+        console.error('[Refresh Debug] Redis session missing');
+      } else {
+        const session = this.deserializeSession(raw);
 
-    if (!raw) return { count: 0 };
+        console.error('[Refresh Debug] Rotation rejected', {
+          userMatches: session.userId === userId,
+          sessionMatches: session.id === sessionId,
+          revoked: session.revokedAt !== null,
+          expired: session.expiresAt.getTime() <= now,
+          tokenHashMatches: session.refreshTokenHash === currentTokenHash,
+        });
+      }
 
-    const session = this.deserializeSession(raw);
-
-    if (
-      session.userId !== userId ||
-      session.revokedAt !== null ||
-      session.expiresAt.getTime() <= Date.now()
-    ) {
       return { count: 0 };
     }
 
-    return { count: 1 };
+    return { count: updated ? 1 : 0 };
   }
 
   async revokeSessionForUser(
@@ -219,5 +230,3 @@ export class SessionRepository {
     await this.redisService.delete(key);
   }
 }
-
-

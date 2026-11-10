@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/stores/auth-store-ui";
@@ -8,6 +8,34 @@ import Image from "next/image";
 
 import Synapse from "../../../../public/Synapse.svg";
 import { Eye, EyeClosed } from "lucide-react";
+import { refreshAccessToken } from "@/apis/api-client";
+
+function getErrorMessage(data: unknown): string {
+  if (typeof data === "string") {
+    return data;
+  }
+
+  if (data && typeof data === "object") {
+    const response = data as {
+      message?: unknown;
+      error?: unknown;
+    };
+
+    if (typeof response.message === "string") {
+      return response.message;
+    }
+
+    if (response.error && typeof response.error === "object") {
+      const nested = response.error as { message?: unknown };
+
+      if (typeof nested.message === "string") {
+        return nested.message;
+      }
+    }
+  }
+
+  return "Something went wrong. Please try again.";
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -18,6 +46,100 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const popupRef = useRef<Window | null>(null);
+
+  function handleGoogleLogin() {
+    setError("");
+
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+
+    if (!apiUrl) {
+      setError("Authentication service is not configured.");
+      return;
+    }
+
+    const popup = window.open(
+      `${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/google`,
+      "synapse-google-login",
+      "width=500,height=650,popup=yes",
+    );
+
+    if (!popup) {
+      setError("Please allow popups to sign in with Google.");
+      return;
+    }
+
+    popupRef.current = popup;
+  }
+
+  useEffect(() => {
+    async function handleMessage(event: MessageEvent) {
+      // Accept messages only from our frontend origin and expected popup.
+      if (event.origin !== window.location.origin) return;
+      if (event.source !== popupRef.current) return;
+
+      if (event.data?.type === "GOOGLE_OAUTH_ERROR") {
+        setError("Google sign-in failed. Please try again.");
+        popupRef.current = null;
+        return;
+      }
+
+      // if (event.data?.type !== "GOOGLE_OAUTH_SUCCESS") return;
+
+      if (event.data?.type === "GOOGLE_OAUTH_SUCCESS") {
+        popupRef.current = null;
+        setLoading(true);
+        setError("");
+
+        try {
+          await refreshAccessToken();
+          router.replace("/");
+        } catch {
+          setError("Unable to complete Google sign-in. Please try again.");
+        } finally {
+          setLoading(false);
+        }
+      }
+
+      popupRef.current = null;
+      setLoading(true);
+      setError("");
+
+      try {
+        // The refresh cookie was set by the backend callback.
+        // Fetch the current session using your existing refresh endpoint.
+        const response = await refreshAccessToken();
+
+        if (!response) {
+          throw new Error("Unable to establish your session.");
+        }
+
+        const result = response;
+
+        // Adjust this extraction to match your API response envelope.
+        const session = result;
+
+        if (!session.accessToken || !session.user) {
+          throw new Error("The server returned an invalid session.");
+        }
+
+        useAuthStore.getState().setSession(session.user, session.accessToken);
+
+        router.replace("/");
+      } catch {
+        setError("Unable to complete Google sign-in. Please try again.");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    window.addEventListener("message", handleMessage);
+
+    return () => {
+      window.removeEventListener("message", handleMessage);
+    };
+  }, [router]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -33,16 +155,13 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const res = await login(normalizedEmail, password);
+      await login(normalizedEmail, password);
 
-      console.log(res);
       router.replace("/");
     } catch (err: unknown) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Unable to sign in. Please try again.",
-      );
+      setError(getErrorMessage(err));
+
+      console.log(err, getErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -108,7 +227,7 @@ export default function LoginPage() {
                 className="px-3 text-sm text-muted-foreground hover:text-foreground"
                 aria-label={showPassword ? "Hide password" : "Show password"}
               >
-                {showPassword ? <EyeClosed /> : <Eye/>}
+                {showPassword ? <EyeClosed /> : <Eye />}
               </button>
             </div>
             <div className="text-right">
@@ -147,9 +266,11 @@ export default function LoginPage() {
           <div className="h-px flex-1 bg-border" />
         </div>
 
-        <a
-          href={`${process.env.NEXT_PUBLIC_API_URL}/auth/google`}
-          className="flex h-11 w-full items-center justify-center gap-3 rounded-lg border bg-background text-sm font-medium transition hover:bg-muted"
+        <button
+          type="button"
+          onClick={() => window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/auth/google`}
+          disabled={loading}
+          className="flex h-11 w-full items-center justify-center gap-3 rounded-lg border bg-background text-sm font-medium transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
         >
           <svg aria-hidden="true" viewBox="0 0 48 48" className="size-5">
             <path
@@ -170,7 +291,7 @@ export default function LoginPage() {
             />
           </svg>
           Continue with Google
-        </a>
+        </button>
 
         <p className="mt-6 text-center text-sm text-muted-foreground">
           Don&apos;t have an account?{" "}

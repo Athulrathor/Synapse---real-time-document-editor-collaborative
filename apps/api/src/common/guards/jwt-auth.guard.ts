@@ -12,6 +12,7 @@ import { AppException } from '../exceptions/app.exception.js';
 import { UsersRepository } from '../../users/repositories/user.repository.js';
 import { SessionRepository } from '../../auth/repositories/session.repository.js';
 import { AuthRepository } from '../../auth/repositories/auth.repository.js';
+import { AuthenticatedUser } from '../decorators/current-user.decorator.js';
 
 interface AccessTokenPayload {
   sub: string;
@@ -21,12 +22,7 @@ interface AccessTokenPayload {
 }
 
 interface AuthenticatedRequest extends Request {
-  user?: {
-    userId: string;
-    email?: string;
-    sessionId: string;
-    tokenVersion: number;
-  };
+  user?: AuthenticatedUser;
 }
 
 @Injectable()
@@ -35,8 +31,8 @@ export class JwtAuthGuard implements CanActivate {
     private readonly jwtTokenService: JwtTokenService,
     private readonly usersRepository: UsersRepository,
     private readonly sessionRepository: SessionRepository,
-    private readonly authRepository: AuthRepository
-  ) {};
+    private readonly authRepository: AuthRepository,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
@@ -136,9 +132,18 @@ export class JwtAuthGuard implements CanActivate {
     // 6. Attach authenticated user to the request.
     request.user = {
       userId: user.id,
-      email: payload.email,
+      email: user.email,
+      name: user.name,
       sessionId: session.id,
       tokenVersion: payload.tokenVersion,
+      avatar: user.avatar
+        ? {
+            id: user.avatar.id,
+            fileId: user.avatar.fileId,
+            name: user.avatar.name,
+            path: user.avatar.path,
+          }
+        : null,
     };
 
     return true;

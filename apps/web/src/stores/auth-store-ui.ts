@@ -1,3 +1,4 @@
+import { ApiError, refreshAccessToken } from "@/apis/api-client";
 import { authService } from "@/apis/auth-api";
 import { create } from "zustand";
 
@@ -5,10 +6,19 @@ export interface AuthUser {
   id: string;
   name: string;
   email: string;
-  avatar?: string | null;
+  avatar: {
+    id: string;
+    fileId: string;
+    path: string;
+    name: string;
+  } | null;
 }
 
-type AuthStatus = "loading" | "authenticated" | "unauthenticated";
+type AuthStatus =
+  | "loading"
+  | "authenticated"
+  | "unauthenticated"
+  | "unavailable";
 
 interface AuthState {
   user: AuthUser | null;
@@ -24,9 +34,14 @@ interface AuthState {
   initializeAuth: () => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  changePassword: (
+    currentPassword: string,
+    newPassword: string,
+    confirmPassword: string,
+  ) => Promise<void>;
 }
 
-export const useAuthStore = create<AuthState>((set,get) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   accessToken: null,
   status: "loading",
@@ -55,17 +70,39 @@ export const useAuthStore = create<AuthState>((set,get) => ({
     set({ status: "loading" });
 
     try {
-      const session = await authService.refresh();
+      const data = await refreshAccessToken();
 
-      get().setSession(session.user, session.accessToken);
-    } catch {
-      get().clearSession();
+      const accessToken = data.accessToken;
+
+      const currentUser = data.user ?? get().user;
+
+      if (!currentUser) {
+        // Refresh response must provide a user, or obtain it via /auth/me.
+        const session = await authService.getMe();
+
+        get().setSession(session.user, accessToken);
+        return;
+      }
+
+      get().setSession(currentUser, accessToken);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        "status" in error &&
+        ((error as ApiError).status === 401 ||
+          (error as ApiError).status === 403)
+      ) {
+        get().clearSession();
+        return;
+      }
+
+      console.error("Auth initialization failed:", error);
+      set({ status: "unavailable" });
     }
   },
 
   login: async (email, password) => {
     const session = await authService.login({ email, password });
-
     get().setSession(session.user, session.accessToken);
   },
 
@@ -75,5 +112,15 @@ export const useAuthStore = create<AuthState>((set,get) => ({
     } finally {
       get().clearSession();
     }
+  },
+
+  changePassword: async (currentPassword, newPassword, confirmPassword) => {
+    await authService.changePassword({
+      currentPassword,
+      newPassword,
+      confirmPassword,
+    });
+
+    get().clearSession();
   },
 }));

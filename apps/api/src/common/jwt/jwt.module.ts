@@ -4,20 +4,20 @@ import { JwtTokenService } from './jwt.service.js';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
 @Module({
-  imports: [ConfigModule,
+  imports: [
+    ConfigModule,
     NestJwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
 
       useFactory: (configService: ConfigService) => ({
-        secret: configService.getOrThrow<string>(
-          'jwt.accessSecret',
-        ),
+        secret: configService.getOrThrow<string>('jwt.accessSecret'),
         signOptions: {
           expiresIn: '10m',
         },
       }),
-    }),],
+    }),
+  ],
   providers: [JwtTokenService],
   exports: [JwtTokenService],
 })

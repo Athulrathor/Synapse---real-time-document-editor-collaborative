@@ -5,12 +5,12 @@ import {
   HealthIndicatorService,
 } from '@nestjs/terminus';
 import { PrismaService } from '../database/prisma.service.js';
-import {Redis} from 'ioredis';
+import { Redis } from 'ioredis';
 
 @Injectable()
 export class HealthService {
-    private readonly redis: Redis;
-    constructor(
+  private readonly redis: Redis;
+  constructor(
     private readonly health: HealthCheckService,
     private readonly prisma: PrismaService,
     private readonly prismaIndicator: HealthIndicatorService,
@@ -26,19 +26,19 @@ export class HealthService {
   }
 
   private async checkDatabase() {
-  const indicator = this.prismaIndicator.check('database');
+    const indicator = this.prismaIndicator.check('database');
 
-  try {
-    await this.prisma.$queryRaw`SELECT 1`;
+    try {
+      await this.prisma.$queryRaw`SELECT 1`;
 
-    return indicator.up();
-  } catch (error) {
-    console.error('DATABASE HEALTH CHECK FAILED:', error);
-    return indicator.down();
+      return indicator.up();
+    } catch (error) {
+      console.error('DATABASE HEALTH CHECK FAILED:', error);
+      return indicator.down();
+    }
   }
-}
 
- private async checkRedis() {
+  private async checkRedis() {
     const indicator = this.prismaIndicator.check('redis');
 
     try {

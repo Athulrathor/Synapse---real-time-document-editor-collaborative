@@ -50,6 +50,28 @@ enum NotificationType {
   WORKSPACE_ROLE_CHANGED
 }
 
+enum WorkspaceInvitationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  REVOKED
+  EXPIRED
+}
+
+enum ActivityType {
+  DOCUMENT_CREATED
+  DOCUMENT_UPDATED
+  VERSION_RESTORED
+  DOCUMENT_ARCHIVED
+  DOCUMENT_RESTORED
+  DOCUMENT_DELETED
+  DOCUMENT_PERMANENTLY_DELETED
+  DOCUMENT_SHARED
+  COMMENT_ADDED
+  COMMENT_UPDATED
+  COMMENT_DELETED
+}
+
 model User {
   id    String @id @default(uuid())
   email String @unique
@@ -60,14 +82,20 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  auth                  UserAuth?
-  avatar                Avatar?
-  googleAccount         GoogleAccount?
-  workspaceMembers      WorkspaceMember[]
-  documents             Document[]        @relation("DocumentCreator")
-  createdVersions       Version[]
-  notificationsReceived Notification[]    @relation("NotificationRecipient")
-  notificationsActed    Notification[]    @relation("NotificationActor")
+  auth                         UserAuth?
+  avatar                       Avatar?
+  googleAccount                GoogleAccount?
+  workspaceMembers             WorkspaceMember[]
+  documents                    Document[]            @relation("DocumentCreator")
+  createdVersions              Version[]
+  notificationsReceived        Notification[]        @relation("NotificationRecipient")
+  notificationsActed           Notification[]        @relation("NotificationActor")
+  documentViews                DocumentView[]
+  starredDocuments             StarredDocument[]
+  workspaceInvitationsSent     WorkspaceInvitation[] @relation("WorkspaceInvitationSender")
+  workspaceInvitationsReceived WorkspaceInvitation[] @relation("WorkspaceInvitationRecipient")
+  activities                   Activity[]
+  yjsDocumentUpdates           YjsDocumentUpdate[]
 }
 
 model Avatar {
@@ -141,8 +169,10 @@ model Workspace {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  members   WorkspaceMember[]
-  documents Document[]
+  members     WorkspaceMember[]
+  documents   Document[]
+  invitations WorkspaceInvitation[]
+  activities  Activity[]
 
   @@index([createdAt])
 }
@@ -171,11 +201,15 @@ model Document {
   createdById String
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
+  deletedAt   DateTime?
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
-  createdBy User      @relation("DocumentCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdBy User              @relation("DocumentCreator", fields: [createdById], references: [id], onDelete: Restrict)
   versions  Version[]
+  yjsState  YjsDocumentState?
+  views     DocumentView[]
+  starredBy StarredDocument[]
 
   @@index([workspaceId, status, updatedAt])
   @@index([createdById])
@@ -207,6 +241,7 @@ model Notification {
   resourceType NotificationResourceType?
   resourceId   String?
   dedupeKey    String?                   @unique
+  resolvedAt   DateTime?
   isRead       Boolean                   @default(false)
   readAt       DateTime?
   createdAt    DateTime                  @default(now())
@@ -217,4 +252,114 @@ model Notification {
   @@index([recipientId, isRead, createdAt])
   @@index([recipientId, createdAt])
   @@index([resourceType, resourceId])
+}
+
+model YjsDocumentState {
+  documentId      String    @id
+  snapshot        Bytes?
+  snapshotVersion Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  lastEditedAt    DateTime?
+  pendingActorIds String[]  @default([])
+  lastCheckpointAt DateTime?
+
+  document Document            @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  updates  YjsDocumentUpdate[]
+
+  @@map("yjs_document_states")
+}
+
+model YjsDocumentUpdate {
+  id         String   @id @default(uuid())
+  documentId String
+  actorId    String?
+  update     Bytes
+  sequence   BigInt   @default(autoincrement())
+  createdAt  DateTime @default(now())
+
+  yjsDocument YjsDocumentState @relation(fields: [documentId], references: [documentId], onDelete: Cascade)
+  actor       User?            @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([documentId, sequence])
+  @@index([actorId])
+  @@map("yjs_document_updates")
+}
+
+model DocumentView {
+  id           String   @id @default(uuid())
+  userId       String
+  documentId   String
+  lastViewedAt DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, documentId])
+  @@index([userId, lastViewedAt])
+  @@index([documentId])
+}
+
+model StarredDocument {
+  id         String   @id @default(uuid())
+  userId     String
+  documentId String
+  createdAt  DateTime @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, documentId])
+  @@index([userId, createdAt])
+  @@index([documentId])
+}
+
+model WorkspaceInvitation {
+  id            String                    @id @default(uuid())
+  workspaceId   String
+  email         String
+  invitedById   String
+  invitedUserId String?
+  role          WorkspaceRole             @default(VIEWER)
+  status        WorkspaceInvitationStatus @default(PENDING)
+  tokenHash     String                    @unique
+  expiresAt     DateTime
+  acceptedAt    DateTime?
+  rejectedAt    DateTime?
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  invitedBy User @relation("WorkspaceInvitationSender", fields: [invitedById], references: [id], onDelete: Cascade)
+
+  invitedUser User? @relation("WorkspaceInvitationRecipient", fields: [invitedUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, status])
+  @@index([email, status])
+  @@index([invitedUserId, status])
+  @@index([expiresAt, status])
+}
+
+model Activity {
+  id   String       @id @default(uuid())
+  type ActivityType
+
+  actorId     String
+  workspaceId String
+  documentId  String?
+  versionId   String?
+
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  actor     User      @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([documentId, createdAt])
+  @@index([versionId])
 }

@@ -4,6 +4,8 @@ import {
   OnGatewayConnection,
   OnGatewayDisconnect,
   SubscribeMessage,
+  ConnectedSocket,
+  MessageBody,
 } from '@nestjs/websockets';
 import { UUID } from 'crypto';
 
@@ -14,6 +16,9 @@ import { HttpStatus } from '@nestjs/common';
 import { AppException } from '../common/exceptions/app.exception.js';
 import { PresenceService } from './presense.service.js';
 import { OnEvent } from '@nestjs/event-emitter';
+import { PrismaService } from '../database/prisma.service.js';
+import { YjsPersistenceService } from './yjs/yjs-persistence.service.js';
+import { isUUID } from 'class-validator';
 
 @WebSocketGateway({
   namespace: '/collaboration',
@@ -29,6 +34,8 @@ export class CollaborationGateway
     private readonly documentService: DocumentsService,
     private readonly collaborationAuthService: CollaborationAuthService,
     private readonly presenseService: PresenceService,
+    private readonly prismaService: PrismaService,
+    private readonly yjsPersistenceService: YjsPersistenceService,
   ) {}
 
   @WebSocketServer()
@@ -42,7 +49,10 @@ export class CollaborationGateway
     return `user:${userId}:notifications`;
   }
 
-  private emitNotification(recipientId: string,notification: Record<string, unknown>): void {
+  private emitNotification(
+    recipientId: string,
+    notification: Record<string, unknown>,
+  ): void {
     this.server
       .to(this.getUserRoom(recipientId))
       .emit('notification:new', notification);
@@ -59,12 +69,6 @@ export class CollaborationGateway
   async handleConnection(client: Socket): Promise<void> {
     const token = client.handshake.auth?.token;
 
-    console.log('Socket connection attempt:', client.id);
-    console.log(
-      'Token provided:',
-      typeof token === 'string' && token.length > 0,
-    );
-
     if (typeof token !== 'string' || !token.trim()) {
       client.disconnect(true);
       return;
@@ -73,6 +77,8 @@ export class CollaborationGateway
     try {
       const user = await this.collaborationAuthService.authenticate(token);
 
+      console.log('connection :', client.id, ' user: ', user.email);
+
       client.data.user = user;
       await client.join(this.getUserRoom(user.userId));
     } catch (error) {
@@ -80,8 +86,12 @@ export class CollaborationGateway
     }
   }
 
-  handleDisconnect(client: Socket) {
-    console.log(`Client disconnected: ${client.id}`);
+  async handleDisconnect(client: Socket) {
+    console.log(
+      `Client disconnected: ${client.id}`,
+      ' user: ',
+      client?.data?.usesr?.email,
+    );
 
     const user = client.data.user;
 
@@ -100,20 +110,321 @@ export class CollaborationGateway
           -':room'.length,
         ) as UUID;
 
-        this.presenseService.leaveDocument(documentId, user.userId, client.id);
+        await this.presenseService.leaveDocument(
+          documentId,
+          user.userId,
+          client.id,
+        );
 
-        this.server.to(room).emit('presence:user-left', {
+        const presence =
+          await this.presenseService.getDocumentPresence(documentId);
+
+        await this.server.to(room).emit('presence:user-left', {
           documentId,
           userId: user.userId,
         });
 
-        this.server
-          .to(room)
-          .emit(
-            'presence:update',
-            this.presenseService.getDocumentPresence(documentId),
-          );
+        await this.server.to(room).emit('presence:update', presence);
       }
+    }
+  }
+
+  @SubscribeMessage('collaboration:sync-request')
+  async handleYjsSyncRequest(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    payload: {
+      documentId: string;
+      requestId: string;
+      state: Uint8Array | Buffer | ArrayBuffer | number[];
+    },
+  ) {
+    const user = client.data.user;
+
+    if (!user) {
+      return { success: false, message: 'Unauthorized' };
+    }
+
+    const documentId = payload?.documentId;
+    const requestId = payload?.requestId;
+
+    if (!documentId || !isUUID(documentId)) {
+      return { success: false, message: 'Invalid document ID' };
+    }
+
+    if (
+      typeof requestId !== 'string' ||
+      requestId.length === 0 ||
+      requestId.length > 100
+    ) {
+      return { success: false, message: 'Invalid reconciliation request ID' };
+    }
+
+    const room = this.getDocumentRoom(documentId as UUID);
+
+    if (!client.rooms.has(room)) {
+      return { success: false, message: 'Join the document first' };
+    }
+
+    try {
+      await this.documentService.findByDocumentId(
+        documentId as UUID,
+        user.userId,
+      );
+
+      const hasState =
+        await this.yjsPersistenceService.hasDocumentState(documentId);
+
+      if (!hasState) {
+        const richText = await this.documentService.getContentForCollaboration(
+          documentId as UUID,
+          user.userId,
+        );
+
+        if (richText) {
+          await this.yjsPersistenceService.initializeFromRichText(
+            documentId,
+            richText as Record<string, unknown>,
+          );
+        }
+      }
+
+      const state = await this.yjsPersistenceService.loadDocument(documentId);
+
+      client.emit('collaboration:sync-state', {
+        documentId,
+        requestId,
+        state: Buffer.from(state),
+      });
+
+      return { success: true, requestId };
+    } catch (error) {
+      console.error(
+        '[Collaboration] Sync request failed:',
+        error instanceof Error ? (error.stack ?? error.message) : error,
+      );
+
+      return {
+        success: false,
+        requestId,
+        message: 'Unable to synchronize document',
+      };
+    }
+  }
+
+  @SubscribeMessage('collaboration:sync-client-state')
+  async handleClientStateSync(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    payload: {
+      documentId: string;
+      requestId: string;
+      state: Uint8Array | Buffer | ArrayBuffer | number[];
+    },
+  ) {
+    const user = client.data.user;
+
+    if (!user) {
+      return { success: false, message: 'Unauthorized' };
+    }
+
+    const documentId = payload?.documentId;
+
+    if (!documentId || !isUUID(documentId)) {
+      return { success: false, message: 'Invalid document ID' };
+    }
+
+    const room = this.getDocumentRoom(documentId as UUID);
+
+    if (!client.rooms.has(room)) {
+      return { success: false, message: 'Join the document first' };
+    }
+
+    try {
+      await this.documentService.findByDocumentId(
+        documentId as UUID,
+        user.userId,
+      );
+
+      let clientState: Uint8Array;
+
+      if (payload.state instanceof ArrayBuffer) {
+        clientState = new Uint8Array(payload.state);
+      } else if (Buffer.isBuffer(payload.state)) {
+        clientState = new Uint8Array(payload.state);
+      } else if (payload.state instanceof Uint8Array) {
+        clientState = new Uint8Array(payload.state);
+      } else if (Array.isArray(payload.state)) {
+        clientState = new Uint8Array(payload.state);
+      } else {
+        return { success: false, message: 'Invalid Yjs state' };
+      }
+
+      if (clientState.byteLength === 0 || clientState.byteLength > 5_000_000) {
+        return { success: false, message: 'Invalid Yjs state size' };
+      }
+
+      await this.yjsPersistenceService.mergeClientState(
+        documentId,
+        Buffer.from(clientState),
+      );
+
+      client.to(room).emit('collaboration:update', {
+        documentId,
+        update: Buffer.from(clientState),
+      });
+
+      return { success: true, requestId: payload?.requestId };
+    } catch (error) {
+      console.error('[Collaboration] Client state sync failed:', error);
+
+      return {
+        success: false,
+
+        message: 'Unable to synchronize client state',
+      };
+    }
+  }
+
+  @SubscribeMessage('collaboration:initialize')
+  async handleYjsInitialize(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    payload: {
+      documentId: string;
+      update: Buffer | Uint8Array | ArrayBuffer;
+    },
+  ) {
+    const user = client.data.user;
+
+    if (!user) {
+      return { success: false, message: 'Unauthorized' };
+    }
+
+    const documentId = payload?.documentId;
+
+    if (!documentId || !isUUID(documentId)) {
+      return { success: false, message: 'Invalid document ID' };
+    }
+
+    const room = this.getDocumentRoom(documentId as UUID);
+
+    if (!client.rooms.has(room)) {
+      return { success: false, message: 'Join the document first' };
+    }
+
+    const incoming = payload?.update;
+
+    let update: Uint8Array;
+
+    if (Buffer.isBuffer(incoming)) {
+      update = new Uint8Array(incoming);
+    } else if (incoming instanceof ArrayBuffer) {
+      update = new Uint8Array(incoming);
+    } else if (incoming instanceof Uint8Array) {
+      update = new Uint8Array(incoming);
+    } else {
+      return { success: false, message: 'Invalid Yjs update' };
+    }
+
+    if (update.byteLength === 0 || update.byteLength > 1_000_000) {
+      return { success: false, message: 'Invalid update size' };
+    }
+
+    try {
+      // The user must be a workspace member.
+      await this.documentService.findByDocumentId(
+        documentId as UUID,
+        user.userId,
+      );
+
+      // Initialize only if the document has no existing Yjs state.
+      const initialized = await this.yjsPersistenceService.initializeDocument(
+        documentId,
+        update,
+      );
+
+      // Return whether this request created the initial state.
+      client.emit('collaboration:initialize-result', {
+        documentId,
+        initialized,
+      });
+
+      return {
+        success: true,
+        initialized,
+      };
+    } catch {
+      return {
+        success: false,
+        message: 'Unable to initialize collaborative document',
+      };
+    }
+  }
+
+  @SubscribeMessage('collaboration:update')
+  async handleYjsUpdate(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    payload: {
+      documentId: string;
+      update: Buffer | Uint8Array | ArrayBuffer;
+    },
+  ) {
+    const user = client.data.user;
+
+    if (!user) {
+      return { success: false, message: 'Unauthorized' };
+    }
+
+    const documentId = payload?.documentId;
+
+    if (!documentId || !isUUID(documentId)) {
+      return { success: false, message: 'Invalid document ID' };
+    }
+
+    const room = this.getDocumentRoom(documentId as UUID);
+
+    if (!client.rooms.has(room)) {
+      return { success: false, message: 'Join the document first' };
+    }
+
+    const incoming = payload?.update;
+
+    let update: Uint8Array;
+
+    if (Buffer.isBuffer(incoming)) {
+      update = new Uint8Array(incoming);
+    } else if (incoming instanceof ArrayBuffer) {
+      update = new Uint8Array(incoming);
+    } else if (incoming instanceof Uint8Array) {
+      update = new Uint8Array(incoming);
+    } else {
+      return { success: false, message: 'Invalid Yjs update' };
+    }
+
+    if (update.byteLength === 0 || update.byteLength > 1_000_000) {
+      return { success: false, message: 'Invalid update size' };
+    }
+
+    try {
+      // Verify edit permission using your existing role rules.
+      await this.documentService.assertCanEditDocument(
+        documentId as UUID,
+        user.userId,
+      );
+
+      // Save first, then broadcast.
+      await this.yjsPersistenceService.persistUpdate(documentId,user.userId, update);
+
+      client.to(room).emit('collaboration:update', {
+        documentId,
+        update: Buffer.from(update),
+      });
+
+      return { success: true };
+    } catch {
+      return { success: false, message: 'Unable to save collaborative update' };
     }
   }
 
@@ -143,6 +454,22 @@ export class CollaborationGateway
     }
 
     try {
+      const remainingNeeds = await this.prismaService.user.findUnique({
+        where: {
+          id: user?.userId,
+        },
+
+        select: {
+          id: true,
+          name: true,
+          avatar: {
+            select: {
+              path: true,
+            },
+          },
+        },
+      });
+
       await this.documentService.findByDocumentId(
         payload.documentId,
         user.userId,
@@ -153,10 +480,12 @@ export class CollaborationGateway
       if (!client.rooms.has(room)) {
         await client.join(room);
 
-        this.presenseService.joinDocument(
+        await this.presenseService.joinDocument(
           payload.documentId,
           client.data.user.userId,
           client.id,
+          remainingNeeds?.avatar?.path ?? '',
+          remainingNeeds?.name ?? 'Unknown',
         );
 
         this.server.to(room).emit('presence:user-joined', {
@@ -165,19 +494,20 @@ export class CollaborationGateway
         });
       }
 
-      this.server
-        .to(room)
-        .emit(
-          'presence:update',
-          this.presenseService.getDocumentPresence(payload.documentId),
-        );
+      const presence = await this.presenseService.getDocumentPresence(
+        payload.documentId,
+      );
+
+      await this.server.to(room).emit('presence:update', presence);
 
       client.emit('document:joined', {
         success: true,
         documentId: payload.documentId,
       });
 
-      console.log(`Socket ${client.id} joined room ${room}`);
+      console.log(
+        `Socket ${client.id} joined room ${room} user: ${user?.email}`,
+      );
 
       return {
         success: true,
@@ -235,7 +565,7 @@ export class CollaborationGateway
     const room = this.getDocumentRoom(payload.documentId);
 
     if (client.rooms.has(room)) {
-      this.presenseService.leaveDocument(
+      const userLeft = await this.presenseService.leaveDocument(
         payload.documentId,
         client.data.user.userId,
         client.id,
@@ -243,10 +573,12 @@ export class CollaborationGateway
 
       await client.leave(room);
 
-      this.server.to(room).emit('presence:user-left', {
-        documentId: payload.documentId,
-        userId: client.data.user.userId,
-      });
+      if (userLeft) {
+        this.server.to(room).emit('presence:user-left', {
+          documentId: payload.documentId,
+          userId: client.data.user.userId,
+        });
+      }
     }
 
     this.server
@@ -268,7 +600,7 @@ export class CollaborationGateway
   }
 
   @SubscribeMessage('presence:set-status')
-  handleSetPresenceStatus(
+  async handleSetPresenceStatus(
     client: Socket,
     payload: {
       documentId: UUID;
@@ -316,18 +648,17 @@ export class CollaborationGateway
       });
     }
 
-    this.presenseService.setStatus(
+    await this.presenseService.setStatus(
       payload.documentId,
       user.userId,
       payload.status,
     );
 
-    this.server
-      .to(room)
-      .emit(
-        'presence:update',
-        this.presenseService.getDocumentPresence(payload.documentId),
-      );
+    const presence = await this.presenseService.getDocumentPresence(
+      payload.documentId,
+    );
+
+    this.server.to(room).emit('presence:update', presence);
 
     return {
       success: true,
@@ -337,8 +668,9 @@ export class CollaborationGateway
   }
 
   @SubscribeMessage('presence:set-typing')
-  handleSetTyping(
-    client: Socket,
+  async handleSetTyping(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
     payload: {
       documentId: UUID;
       isTyping: boolean;
@@ -385,15 +717,19 @@ export class CollaborationGateway
       });
     }
 
-    this.presenseService.setTyping(
+    await this.presenseService.setTyping(
       payload.documentId,
       user.userId,
       payload.isTyping,
     );
 
+    const typingUsers = await this.presenseService.getTypingUsers(
+      payload.documentId,
+    );
+
     this.server.to(room).emit('presence:typing-update', {
       documentId: payload.documentId,
-      typingUsers: this.presenseService.getTypingUsers(payload.documentId),
+      typingUsers,
     });
 
     return {
@@ -458,7 +794,7 @@ export class CollaborationGateway
       });
     }
 
-    this.presenseService.setCursor(
+    await this.presenseService.setCursor(
       payload.documentId,
       user.userId,
       payload.position,

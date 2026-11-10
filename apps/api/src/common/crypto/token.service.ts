@@ -12,7 +12,7 @@ export class TokenService {
   }
 
   async generateDigitOtp(): Promise<string> {
-     return String(randomInt(100000, 1_000_000));
+    return String(randomInt(100000, 1_000_000));
   }
 
   async createRandomUUID(): Promise<string> {

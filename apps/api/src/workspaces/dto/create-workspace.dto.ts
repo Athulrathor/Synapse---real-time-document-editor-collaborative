@@ -1,5 +1,6 @@
-import { IsNotEmpty, IsString, IsUUID, Length } from 'class-validator';
+import { IsOptional, IsString, Length } from 'class-validator';
 import type { UUID } from 'crypto';
+import { optional } from 'joi';
 
 export class CreateWorkspaceDto {
   @IsString()

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
 import { AuthRepository } from './repositories/auth.repository.js';
@@ -24,11 +24,18 @@ import { GoogleAccountRepository } from './repositories/google-account.repositor
 import { ImageKitModule } from '../common/imagekit/imagekit.module.js';
 import { ImageKitService } from '../common/imagekit/imagekit.service.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
-import { JwtTokenService } from '../common/jwt/jwt.service.js';
-import { JwtService } from '@nestjs/jwt';
+import { GoogleAuthGuard } from './strategies/google-auth-oauth.guard.js';
 
 @Module({
-  imports: [UsersModule, JwtModule, JobsModule, CryptoModule, RedisModule,ImageKitModule,PassportModule.register({ session: false }),],
+  imports: [
+    forwardRef(() => UsersModule),
+    JwtModule,
+    JobsModule,
+    CryptoModule,
+    RedisModule,
+    ImageKitModule,
+    PassportModule.register({ session: false }),
+  ],
   controllers: [AuthController],
   providers: [
     AuthService,
@@ -45,7 +52,14 @@ import { JwtService } from '@nestjs/jwt';
     GoogleAccountRepository,
     ImageKitService,
     JwtAuthGuard,
+    GoogleAuthGuard,
   ],
-  exports: [AuthService,JwtAuthGuard,SessionRepository,AuthRepository,UsersRepository],
+  exports: [
+    AuthService,
+    JwtAuthGuard,
+    SessionRepository,
+    AuthRepository,
+    UsersRepository,
+  ],
 })
 export class AuthModule {}

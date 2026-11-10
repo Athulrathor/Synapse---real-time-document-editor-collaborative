@@ -4,7 +4,7 @@ import { TokenService } from './token.service.js';
 import { EncryptionService } from './encryption.service.js';
 
 @Module({
-  providers: [PasswordService,TokenService,EncryptionService],
-  exports: [PasswordService,TokenService,EncryptionService]
+  providers: [PasswordService, TokenService, EncryptionService],
+  exports: [PasswordService, TokenService, EncryptionService],
 })
 export class CryptoModule {}

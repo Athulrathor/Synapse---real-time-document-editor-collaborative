@@ -32,17 +32,16 @@ export class DocumentRoleGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const requiredRoles = this.reflector.getAllAndOverride<
-      WorkspaceRole[]
-    >(ROLES_KEY, [context.getHandler(), context.getClass()]);
+    const requiredRoles = this.reflector.getAllAndOverride<WorkspaceRole[]>(
+      ROLES_KEY,
+      [context.getHandler(), context.getClass()],
+    );
 
     if (!requiredRoles?.length) {
       return true;
     }
 
-    const request = context
-      .switchToHttp()
-      .getRequest<AuthenticatedRequest>();
+    const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
 
     const userId = request.user?.userId;
     const documentId = request.params?.documentId;
@@ -63,10 +62,9 @@ export class DocumentRoleGuard implements CanActivate {
       });
     }
 
-    const document =
-      await this.documentsRepository.findDocumentWorkspace(
-        documentId as UUID,
-      );
+    const document = await this.documentsRepository.findDocumentWorkspace(
+      documentId as UUID,
+    );
 
     if (!document) {
       throw new AppException({
@@ -76,11 +74,10 @@ export class DocumentRoleGuard implements CanActivate {
       });
     }
 
-    const membership =
-      await this.workspacesRepository.findMembership(
-        document.workspaceId,
-        userId,
-      );
+    const membership = await this.workspacesRepository.findMembership(
+      document.workspaceId,
+      userId,
+    );
 
     // Do not reveal a document's existence to non-members.
     if (!membership) {

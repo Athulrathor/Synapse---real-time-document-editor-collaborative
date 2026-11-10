@@ -7,10 +7,7 @@ export class PasswordService {
     return argon2.hash(password);
   }
 
-  async verify(
-    passwordHash: string,
-    password: string,
-  ): Promise<boolean> {
+  async verify(passwordHash: string, password: string): Promise<boolean> {
     return argon2.verify(passwordHash, password);
   }
 }

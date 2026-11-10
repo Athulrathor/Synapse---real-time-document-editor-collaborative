@@ -5,6 +5,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/providers/theme-provider";
 import { QueryProvider } from "@/providers/query-provider";
 import { AuthInitializer } from "@/components/auth/auth-initializer";
+import { Toaster } from "sonner";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,7 +33,8 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
+      <body suppressHydrationWarning
+ className="flex min-h-full flex-col workspace-scrollbar">
         <QueryProvider>
           <ThemeProvider
             attribute="class"
@@ -42,6 +44,7 @@ export default function RootLayout({
           >
             <AuthInitializer />
             {children}
+            <Toaster />
           </ThemeProvider>
         </QueryProvider>
       </body>

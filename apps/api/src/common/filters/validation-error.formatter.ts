@@ -15,9 +15,7 @@ export function formatValidationErrors(
       : error.property;
 
     const messages = Object.values(error.constraints ?? {});
-    const currentError = messages.length
-      ? [{ field, messages }]
-      : [];
+    const currentError = messages.length ? [{ field, messages }] : [];
 
     return [
       ...currentError,

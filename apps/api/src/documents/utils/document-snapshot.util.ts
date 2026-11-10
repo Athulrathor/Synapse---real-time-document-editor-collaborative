@@ -1,18 +1,25 @@
+import { Prisma } from "@prisma/client";
+
 type DocumentSnapshotInput = {
   title: string;
   content: unknown;
 };
 
-export function createDocumentSnapshot(
-  document: DocumentSnapshotInput,
-): Buffer {
-  const snapshot = {
-    title: document.title,
-    content: document.content,
+export function createDocumentSnapshot(arg0: {
+  title: string;
+  content: {
+    text: {
+      text: string;
+      richText: Record<string, unknown>;
+    };
   };
-
-  return Buffer.from(JSON.stringify(snapshot), 'utf8');
+}): Prisma.InputJsonValue {
+  return {
+    title: arg0.title,
+    content: arg0.content,
+  } as unknown as Prisma.InputJsonValue;
 }
+
 
 export function parseDocumentSnapshot(snapshot: Uint8Array): {
   title: string;

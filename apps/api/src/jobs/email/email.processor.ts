@@ -18,7 +18,7 @@ export class EmailProcessor extends WorkerHost {
 
   async process(job: Job<EmailJob>): Promise<void> {
     switch (job.data.type) {
-      case 'verification':
+      case 'verification': {
         const token = await this.encryptionService.decrypt(job.data.token);
         await this.emailService.sendVerificationEmail(
           job.data.email,
@@ -26,6 +26,7 @@ export class EmailProcessor extends WorkerHost {
           token,
         );
         return;
+      }
 
       case 'password-reset':
         const otpHash = await this.encryptionService.decrypt(job.data.token);
@@ -44,6 +45,19 @@ export class EmailProcessor extends WorkerHost {
           job.data.expiresInMinutes,
         );
         return;
+
+      case 'workspace-invitation': {
+        const token = await this.encryptionService.decrypt(job.data.token);
+        await this.emailService.sendWorkspaceInvitationEmail(
+          job.data.email,
+          job.data.workspaceName,
+          job.data.inviterName,
+          job.data.role,
+          token,
+          job.data.expiresAt,
+        );
+        return;
+      }
 
       default: {
         const unsupported: never = job.data;

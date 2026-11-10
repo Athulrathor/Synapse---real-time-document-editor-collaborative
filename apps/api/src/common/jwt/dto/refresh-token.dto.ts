@@ -1,4 +1,3 @@
-
 import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
 
 export class RefreshTokenDto {
@@ -7,4 +6,3 @@ export class RefreshTokenDto {
   @MaxLength(4096)
   refreshToken!: string;
 }
-

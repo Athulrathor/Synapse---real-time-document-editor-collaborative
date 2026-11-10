@@ -12,7 +12,7 @@ export class UsersRepository {
       where: { email },
     });
 
-    if(!result) return null;
+    if (!result) return null;
 
     return result;
   }
@@ -34,23 +34,134 @@ export class UsersRepository {
     });
   }
 
-  findByEmailWithAuth(email: string) {
-    return this.prisma.user.findUnique({
+  async findByEmailWithAuth(email: string) {
+    return await this.prisma.user.findUnique({
       where: {
         email,
       },
       include: {
         auth: true,
+        avatar: {
+          select: {
+            id: true,
+            name: true,
+            path: true,
+            fileId: true,
+          },
+        },
+        googleAccount: {
+          select: {
+            id: true,
+            googleId: true,
+          },
+        },
       },
     });
   }
 
-  findByIdWithAuth(userId: string) {
-    return this.prisma.user.findUnique({
+  async findByIdWithAuth(userId: string) {
+    return await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
         auth: true,
+        avatar: {
+          select: {
+            id: true,
+            name: true,
+            path: true,
+            fileId: true,
+          },
+        },
+        googleAccount: {
+          select: {
+            id: true,
+            googleId: true,
+          },
+        },
       },
     });
   }
-};
+
+  async findProfileById(userId: string) {
+    return this.prisma.user.findUnique({
+      where: {
+        id: userId,
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        createdAt: true,
+        avatar: {
+          select: {
+            id: true,
+            name: true,
+            path: true,
+            fileId: true,
+          },
+        },
+      },
+    });
+  }
+
+  async updateProfile(userId: string, name: string) {
+    return this.prisma.user.update({
+      where: {
+        id: userId,
+      },
+      data: {
+        name,
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        createdAt: true,
+        avatar: {
+          select: {
+            id: true,
+            name: true,
+            path: true,
+            fileId: true,
+          },
+        },
+      },
+    });
+  }
+
+  async createOrUpdateAvatar(
+    userId: string,
+    data: {
+      name: string;
+      fileId: string;
+      path: string;
+    },
+  ) {
+    return this.prisma.avatar.upsert({
+      where: { userId },
+      create: {
+        userId,
+        ...data,
+      },
+      update: data,
+    });
+  }
+
+  async findAvatarByUserId(userId: string) {
+    return this.prisma.avatar.findUnique({
+      where: { userId },
+      select: {
+        id: true,
+        name: true,
+        fileId: true,
+        path: true,
+      },
+    });
+  }
+
+  async deleteAvatar(userId: string) {
+    return this.prisma.avatar.delete({
+      where: { userId },
+    });
+  }
+}

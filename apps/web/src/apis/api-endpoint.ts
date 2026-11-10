@@ -10,8 +10,14 @@ export const API_ENDPOINTS = {
     forgotPassword: "/auth/forgot/password",
     verifyPasswordResetOtp: "/auth/verify/otp",
     resetPassword: "/auth/reset/password",
+    changePassword: "change/password",
     google: "/auth/google",
     googleCallback: "/auth/google/callback",
+    googleExchange: "/auth/google/exchange",
+  },
+
+  activity: {
+    list: "/activity",
   },
 
   workspaces: {
@@ -25,17 +31,26 @@ export const API_ENDPOINTS = {
     member: (workspaceId: string, userId: string) =>
       `/workspaces/${workspaceId}/members/${userId}`,
 
-    documents: (workspaceId: string) => `/workspaces/${workspaceId}/documents`,
+    // Workspace invitations
+    invitations: (workspaceId: string) =>
+      `/workspaces/${workspaceId}/invitations`,
+
+    revokeInvitation: (workspaceId: string, invitationId: string) =>
+      `/workspaces/${workspaceId}/invitations/${invitationId}`,
+
+    acceptInvitation: "/workspaces/invitations/accept",
+    rejectInvitation: "/workspaces/invitations/reject",
+
+    // Documents
+    documents: (workspaceId: string) => `/documents/${workspaceId}/documents`,
   },
 
   document: {
-    // Workspace-scoped routes
-    create: (workspaceId: string) => `/workspaces/${workspaceId}/documents`,
+    create: (workspaceId: string) => `/documents/${workspaceId}/documents`,
 
     listByWorkspace: (workspaceId: string) =>
-      `/workspaces/${workspaceId}/documents`,
+      `/documents/${workspaceId}/documents`,
 
-    // Document routes
     detail: (documentId: string) => `/documents/${documentId}`,
 
     search: "/documents/search",
@@ -52,29 +67,39 @@ export const API_ENDPOINTS = {
     restore: (documentId: string) => `/documents/${documentId}/restore`,
 
     delete: (documentId: string) => `/documents/${documentId}`,
+
+    recent: `/documents/recent`,
+
+    starred: "/documents/starred",
+
+    trash: "/documents/trash",
+
+    restoreFromTrash: (documentId: string) =>
+      `/documents/${documentId}/trash/restore`,
+
+    permanentlyDelete: (documentId: string) =>
+      `/documents/${documentId}/permanent`,
+
+    star: (documentId: string) => `/documents/${documentId}/star`,
   },
 
   notifications: {
     list: "/notifications",
 
-    unreadCount: "/notifications/unread-count",
+    unreadCount: "/notifications/unread/count",
 
     markAsRead: (id: string) => `/notifications/${id}/read`,
 
-    markAllAsRead: "/notifications/read-all",
+    markAllAsRead: "/notifications/read/all",
 
     delete: (id: string) => `/notifications/${id}`,
   },
 
   users: {
     create: "/users",
-
     list: "/users",
-
-    detail: (id: string) => `/users/${id}`,
-
-    update: (id: string) => `/users/${id}`,
-
+    detail: "/users/me",
+    update: "/users/me",
     delete: (id: string) => `/users/${id}`,
   },
 } as const;
