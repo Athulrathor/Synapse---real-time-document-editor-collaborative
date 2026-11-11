@@ -48,8 +48,8 @@ async function bootstrap() {
     credentials: true,
   });
 
-  const port = configService.get('app.port', 4000) as number;
+  const port = Number(process.env.PORT ?? configService.get('app.port', 4000));
 
-  await app.listen(process.env.PORT ?? 4000);
+  await app.listen(port, '0.0.0.0');
 }
 await bootstrap();
