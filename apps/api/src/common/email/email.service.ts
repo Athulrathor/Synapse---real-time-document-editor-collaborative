@@ -6,7 +6,6 @@ import * as nodemailer from 'nodemailer';
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
-
   private readonly transporter: nodemailer.Transporter;
 
   constructor(private readonly configService: ConfigService) {
@@ -26,7 +25,7 @@ export class EmailService {
     name: string,
     token: string,
   ): Promise<void> {
-    const verificationUrl = `http://localhost:3000/verify/email?token=${token}`;
+    const verificationUrl = `${this.configService.get<string>('app.frontendUrl')}/verify/email?token=${token}`;
 
     await this.transporter.sendMail({
       from: this.configService.get<string>('email.from'),

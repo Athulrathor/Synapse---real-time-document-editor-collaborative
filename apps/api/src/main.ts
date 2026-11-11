@@ -42,7 +42,7 @@ async function bootstrap() {
 
   app.enableCors({
     origin: [
-      configService.get<string>('app.corsOrigin'),
+      configService.get<string>('app.frontendUrl'),
       'http://localhost:3000',
     ],
     credentials: true,
