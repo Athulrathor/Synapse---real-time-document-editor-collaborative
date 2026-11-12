@@ -42,6 +42,7 @@ export class OutboxDispatcherService {
 
         switch (event.eventType) {
           case 'USER_VERIFICATION_EMAIL_REQUESTED':
+            console.log("cron started USER_VERIFICATION")
             await this.emailQueue.enqueueVerification(
               {
                 type: 'verification',
@@ -54,6 +55,7 @@ export class OutboxDispatcherService {
             break;
 
           case 'RESET_PASSWORD_EMAIL_REQUESTED':
+            console.log("cron started RESET_PASSWORD")
             await this.emailQueue.enqueuePasswordReset(
               {
                 type: 'password-reset',
@@ -66,6 +68,7 @@ export class OutboxDispatcherService {
             break;
 
           case 'DOCUMENT_CREATED':
+            console.log("cron started DOCUMENT_CREATED")
             const documentEvent = event.payload as {
               documentId: string;
               workspaceId: string;
@@ -80,6 +83,7 @@ export class OutboxDispatcherService {
             break;
 
           case 'WORKSPACE_INVITATION_EMAIL_REQUESTED': {
+            console.log("cron started WORKSPACE_INVITATION_EMAIL_REQUESTED")
             const invitationPayload = event.payload as {
               workspaceId: string;
               workspaceName: string;
