@@ -535,21 +535,14 @@ export class AuthService {
         name: user.name,
         email: user.email,
         status: user.status,
-        avatar: avatar: user.avatar
-  ? {
-      id: user.avatar.id,
-      name: user.avatar.name,
-      path: user.avatar.path,
-      fileId: user.avatar.fileId,
-    }
-  : undefined,
+        avatar: avatar: user.avatar,
           ? {
               id: user.avatar.id,
               fileId: user.avatar.fileId,
               name: user.avatar.name,
               path: user.avatar.path,
             }
-          : null,
+          : undefined,
       },
     };
   }
