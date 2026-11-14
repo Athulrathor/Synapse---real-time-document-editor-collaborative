@@ -328,12 +328,12 @@ export class AuthController {
       );
 
       res.cookie('refresh_token', result.refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 30 * 24 * 60 * 60 * 1000,
-        path: '/api/v1/auth',
-      });
+  httpOnly: true,
+  secure: true,
+  sameSite: 'none',
+  maxAge: 30 * 24 * 60 * 60 * 1000,
+  path: '/api/v1/auth',
+});
 
       const redirectUrl = new URL('/google/callback', frontendUrl);
 
