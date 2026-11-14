@@ -535,7 +535,14 @@ export class AuthService {
         name: user.name,
         email: user.email,
         status: user.status,
-        avatar: user.avatar
+        avatar: avatar: user.avatar
+  ? {
+      id: user.avatar.id,
+      name: user.avatar.name,
+      path: user.avatar.path,
+      fileId: user.avatar.fileId,
+    }
+  : undefined,
           ? {
               id: user.avatar.id,
               fileId: user.avatar.fileId,
