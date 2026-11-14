@@ -1080,11 +1080,21 @@ export class AuthService {
         `google-avatar-${googleId}.jpg`,
       );
 
-      uploadedAvatar = {
-        fileId: uploaded.fileId,
-        path: uploaded.filePath,
-        name: uploaded.name,
-      };
+      const { fileId, filePath, name } = uploaded;
+
+if (fileId && filePath && name) {
+  uploadedAvatar = {
+    fileId,
+    path: filePath,
+    name,
+  };
+} else {
+  throw new AppException({
+    code: 'INVALID_AVATAR_UPLOAD',
+    message: 'ImageKit returned incomplete avatar information.',
+    status: HttpStatus.INTERNAL_SERVER_ERROR,
+  });
+}
     }
   }
 
