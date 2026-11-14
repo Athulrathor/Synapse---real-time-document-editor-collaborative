@@ -1071,8 +1071,8 @@ export class AuthService {
     name: string;
   } | null = null;
 
-  if (profile.picture) {
-    const buffer = await this.downloadGoogleAvatar(profile.picture);
+  if (profile.avatarUrl) {
+    const buffer = await this.downloadGoogleAvatar(profile.avatarUrl);
 
     if (buffer) {
       const uploaded = await this.imagekitService.uploadAvatar(
