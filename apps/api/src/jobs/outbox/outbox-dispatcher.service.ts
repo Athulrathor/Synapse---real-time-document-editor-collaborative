@@ -15,7 +15,7 @@ import { PrismaService } from '../../database/prisma.service.js';
 
 @Injectable()
 export class OutboxDispatcherService {
-  // private readonly logger = new Logger(OutboxDispatcherService.name);
+  private readonly logger = new Logger(OutboxDispatcherService.name);
   private readonly logger = new Logger(YjsPersistenceService.name);
 
   constructor(
@@ -29,8 +29,21 @@ export class OutboxDispatcherService {
 
   @Cron('*/5 * * * * *')
   async dispatchPendingEvents(): Promise<void> {
+    
+    this.logger.log('[CRON] dispatchPendingEvents triggered');
+
+  try {
     const events = await this.outboxRepository.claimPending(50);
 
+    this.logger.log(`[CRON] Claimed ${events.length} events`);
+
+    // Keep your existing for-loop here.
+  } catch (error) {
+    this.logger.error(
+      '[CRON] dispatchPendingEvents failed',
+      error instanceof Error ? error.stack : String(error),
+    );
+  }
     for (const event of events) {
       try {
         const payload = event.payload as {
