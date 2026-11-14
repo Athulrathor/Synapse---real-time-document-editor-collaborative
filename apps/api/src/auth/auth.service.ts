@@ -1010,7 +1010,7 @@ export class AuthService {
 
   private async resolveGoogleUser(
   profile: GoogleUserProfile,
-): Promise<UserWithRelations> {
+): Promise<LoginsResponse> {
   const googleId = profile.googleId?.trim();
   const email = profile.email?.trim().toLowerCase();
   const emailVerified = profile.emailVerified;
