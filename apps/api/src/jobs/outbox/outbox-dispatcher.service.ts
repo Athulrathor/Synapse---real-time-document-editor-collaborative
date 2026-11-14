@@ -16,7 +16,7 @@ import { PrismaService } from '../../database/prisma.service.js';
 @Injectable()
 export class OutboxDispatcherService {
   private readonly logger = new Logger(OutboxDispatcherService.name);
-  private readonly logger = new Logger(YjsPersistenceService.name);
+  private readonly logger2 = new Logger(YjsPersistenceService.name);
 
   constructor(
     private readonly outboxRepository: OutboxRepository,
@@ -32,18 +32,10 @@ export class OutboxDispatcherService {
     
     this.logger.log('[CRON] dispatchPendingEvents triggered');
 
-  try {
     const events = await this.outboxRepository.claimPending(50);
 
     this.logger.log(`[CRON] Claimed ${events.length} events`);
 
-    // Keep your existing for-loop here.
-  } catch (error) {
-    this.logger.error(
-      '[CRON] dispatchPendingEvents failed',
-      error instanceof Error ? error.stack : String(error),
-    );
-  }
     for (const event of events) {
       try {
         const payload = event.payload as {
@@ -167,7 +159,8 @@ export class OutboxDispatcherService {
 
   @Cron('*/5 * * * * *')
   async processPendingCheckpoints(): Promise<void> {
-    // console.log('[Scheduler] processPendingCheckpoints executed');
+    this.logger2.log('[CRON] dispatchPendingEvents triggered');
+
     const cutoff = new Date(Date.now() - 30_000);
 
     const pendingDocuments = await this.prisma.yjsDocumentState.findMany({
@@ -182,6 +175,8 @@ export class OutboxDispatcherService {
       take: 20,
       select: { documentId: true },
     });
+
+    this.logger2.log(`[CRON] Claimed ${pendingDocuments} events`);
 
     for (const { documentId } of pendingDocuments) {
       try {
