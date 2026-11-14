@@ -530,19 +530,7 @@ export class AuthService {
     return {
       accessToken: accessToken,
       refreshToken: refreshToken,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        status: user.status,
-        avatar: avatar: user.avatar ? {
-              id: user.avatar.id,
-              fileId: user.avatar.fileId,
-              name: user.avatar.name,
-              path: user.avatar.path,
-            }
-          : null,
-      },
+      user,
     };
   }
 
