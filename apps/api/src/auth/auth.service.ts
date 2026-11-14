@@ -541,7 +541,7 @@ export class AuthService {
               name: user.avatar.name,
               path: user.avatar.path,
             }
-          : undefined,
+          : null,
       },
     };
   }
