@@ -284,7 +284,7 @@ export class AuthController {
     @Req() req: Request & { user: GoogleUserProfile },
     @Res() res: Response,
   ) {
-    const frontendUrl = this.configService.get<string>('app.googleCallbackUrl');
+    const frontendUrl = this.configService.get<string>('app.frontendUrl');
 
     if (!frontendUrl) {
       throw new AppException({
@@ -346,7 +346,7 @@ export class AuthController {
         error instanceof Error ? error.stack : String(error),
       );
 
-      const redirectUrl = new URL(frontendUrl);
+      const redirectUrl = new URL('/google/callback', frontendUrl);
 
       const reason =
         error instanceof AppException &&
