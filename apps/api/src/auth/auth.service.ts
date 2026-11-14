@@ -119,6 +119,45 @@ export class AuthService {
     }
   }
 
+  private mapGoogleUser(user: {
+  id: string;
+  email: string;
+  name: string;
+  status: UserStatus;
+  createdAt: Date;
+  auth: { id: string; emailVerified: boolean } | null;
+  avatar: {
+    id: string;
+    name: string;
+    path: string;
+    fileId: string;
+  } | null;
+}): LoginsResponse['user'] {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    status: user.status,
+    createdAt: user.createdAt,
+
+    auth: user.auth
+      ? {
+          id: user.auth.id,
+          emailVerified: user.auth.emailVerified,
+        }
+      : undefined,
+
+    avatar: user.avatar
+      ? {
+          id: user.avatar.id,
+          name: user.avatar.name,
+          path: user.avatar.path,
+          fileId: user.avatar.fileId,
+        }
+      : undefined,
+  };
+}
+
   constructor(
     private readonly authRepository: AuthRepository,
     private readonly verificationRepository: VerificationRepository,
@@ -454,11 +493,7 @@ export class AuthService {
     ipAddress: string,
     userAgent: string,
     deviceName: string,
-  ): Promise<{
-    accessToken: string;
-    refreshToken: string;
-    user: AuthUserResponse;
-  }> {
+  ): Promise<LoginsResponse> {
     const user = await this.resolveGoogleUser(profile);
 
     const sessionId = await this.tokenService.createRandomUUID();
@@ -1010,23 +1045,7 @@ export class AuthService {
 
   private async resolveGoogleUser(
   profile: GoogleUserProfile,
-): Promise< {
-    id: string;
-    email: string;
-    name: string;
-    status: UserStatus;
-    createdAt: Date;
-    auth?: {
-      id: string;
-      emailVerified: boolean;
-    };
-    avatar?: {
-      id: string;
-      name: string;
-      path: string;
-      fileId: string;
-    };
-  }> {
+): Promise<LoginsResponse['user']> {
   const googleId = profile.googleId?.trim();
   const email = profile.email?.trim().toLowerCase();
   const emailVerified = profile.emailVerified;
@@ -1064,7 +1083,7 @@ export class AuthService {
       });
     }
 
-    return existingGoogleAccount.user;
+    return this.mapGoogleUser(existingGoogleAccount.user);
   }
 
   // 3. Do not automatically link accounts using email
@@ -1087,7 +1106,8 @@ export class AuthService {
     name: string;
   } | null = null;
 
-  if (profile.avatarUrl) {
+if (profile.avatarUrl) {
+  try {
     const buffer = await this.downloadGoogleAvatar(profile.avatarUrl);
 
     if (buffer) {
@@ -1098,21 +1118,19 @@ export class AuthService {
 
       const { fileId, filePath, name } = uploaded;
 
-if (fileId && filePath && name) {
-  uploadedAvatar = {
-    fileId,
-    path: filePath,
-    name,
-  };
-} else {
-  throw new AppException({
-    code: 'INVALID_AVATAR_UPLOAD',
-    message: 'ImageKit returned incomplete avatar information.',
-    status: HttpStatus.INTERNAL_SERVER_ERROR,
-  });
-}
+      if (fileId && filePath && name) {
+        uploadedAvatar = {
+          fileId,
+          path: filePath,
+          name,
+        };
+      }
     }
+  } catch (error) {
+    this.logError(error);
+    uploadedAvatar = null;
   }
+}
 
   // 5. Create user and related records atomically
   try {
@@ -1156,7 +1174,7 @@ if (fileId && filePath && name) {
       });
     });
 
-    return user;
+    return this.mapGoogleUser(user);
   } catch (error) {
     // 6. Handle concurrent Google login requests
     const linkedAccount =
@@ -1194,7 +1212,7 @@ if (fileId && filePath && name) {
         });
       }
 
-      return linkedAccount.user;
+      return this.mapGoogleUser(linkedAccount.user);
     }
 
     // 7. Check if another request created the email account
