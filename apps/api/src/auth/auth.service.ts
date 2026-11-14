@@ -1150,7 +1150,7 @@ export class AuthService {
     // This request's uploaded image was not used by the concurrent request.
     if (uploadedAvatar) {
       try {
-        await this.imageService.deleteImage(uploadedAvatar.fileId);
+        await this.imagekitService.deleteImage(uploadedAvatar.fileId);
       } catch (cleanupError) {
         console.error(
           'Failed to clean up unused Google avatar:',
