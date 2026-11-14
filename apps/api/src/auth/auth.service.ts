@@ -1009,120 +1009,132 @@ export class AuthService {
   // }
 
   private async resolveGoogleUser(
-    profile: GoogleUserProfile,
-  ): Promise<AuthUserResponse> {
-    const googleId = profile.googleId?.trim();
-    const email = profile.email?.trim().toLowerCase();
+  profile: GoogleUserProfile,
+): Promise<UserWithRelations> {
+  const googleId = profile.googleId?.trim();
+  const email = profile.email?.trim().toLowerCase();
+  const emailVerified = profile.emailVerified;
 
-    if (!googleId || !email) {
-      throw new AppException({
-        code: 'INVALID_GOOGLE_PROFILE',
-        message: 'Google did not provide the required account information.',
-      });
-    }
+  // 1. Validate Google profile
+  if (!googleId || !email || !emailVerified) {
+    throw new AppException({
+      code: 'INVALID_GOOGLE_PROFILE',
+      message: 'Google account information is invalid or email is not verified.',
+      status: HttpStatus.UNAUTHORIZED,
+    });
+  }
 
-    if (!profile.emailVerified) {
-      throw new AppException({
-        code: 'GOOGLE_EMAIL_NOT_VERIFIED',
-        message: 'Your Google email address must be verified.',
-      });
-    }
-
-    // 1. Find an existing Google account using Google's stable ID.
-    const existingGoogleAccount = await this.prisma.googleAccount.findUnique({
+  // 2. Check whether Google account is already linked
+  const existingGoogleAccount =
+    await this.prisma.googleAccount.findUnique({
       where: { googleId },
       include: {
         user: {
           include: {
-            auth: {
-              select: {
-                id: true,
-                emailVerified: true,
-                twoFactorEnabled: true,
-              },
-            },
-            avatar: {
-              select: {
-                id: true,
-                name: true,
-                fileId: true,
-                path: true,
-              },
-            },
+            auth: true,
+            avatar: true,
             googleAccount: true,
           },
         },
       },
     });
 
-    if (existingGoogleAccount) {
-      const user = existingGoogleAccount.user;
-
-      if (user.status !== 'ACTIVE') {
-        throw new AppException({
-          code: 'ACCOUNT_INACTIVE',
-          message: 'Your account is inactive.',
-        });
-      }
-
-      return user;
+  if (existingGoogleAccount) {
+    if (existingGoogleAccount.user.status !== 'ACTIVE') {
+      throw new AppException({
+        code: 'ACCOUNT_INACTIVE',
+        message: 'Your account is inactive.',
+        status: HttpStatus.FORBIDDEN,
+      });
     }
 
-    // 2. Check whether a Synapse account already uses this email.
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email },
-      include: {
-        auth: true,
-        avatar: true,
-        googleAccount: true,
-      },
+    return existingGoogleAccount.user;
+  }
+
+  // 3. Do not automatically link accounts using email
+  const existingUser = await this.prisma.user.findUnique({
+    where: { email },
+  });
+
+  if (existingUser) {
+    throw new AppException({
+      code: 'GOOGLE_ACCOUNT_LINK_REQUIRED',
+      message: 'An account with this email already exists. Please sign in and link your Google account.',
+      status: HttpStatus.CONFLICT,
+    });
+  }
+
+  // 4. Download and upload Google avatar for a new user
+  let uploadedAvatar: {
+    fileId: string;
+    path: string;
+    name: string;
+  } | null = null;
+
+  if (profile.picture) {
+    const buffer = await this.downloadGoogleAvatar(profile.picture);
+
+    if (buffer) {
+      const uploaded = await this.imageService.uploadAvatar(
+        buffer,
+        `google-avatar-${googleId}.jpg`,
+      );
+
+      uploadedAvatar = {
+        fileId: uploaded.fileId,
+        path: uploaded.filePath,
+        name: uploaded.name,
+      };
+    }
+  }
+
+  // 5. Create user and related records atomically
+  try {
+    const user = await this.prisma.$transaction(async (tx) => {
+      return tx.user.create({
+        data: {
+          email,
+          name: profile.name?.trim() || email.split('@')[0],
+          status: 'ACTIVE',
+
+          auth: {
+            create: {
+              passwordHash: null,
+              emailVerified: true,
+            },
+          },
+
+          googleAccount: {
+            create: {
+              googleId,
+              email,
+              emailVerified: true,
+            },
+          },
+
+          ...(uploadedAvatar && {
+            avatar: {
+              create: {
+                name: uploadedAvatar.name,
+                fileId: uploadedAvatar.fileId,
+                path: uploadedAvatar.path,
+              },
+            },
+          }),
+        },
+        include: {
+          auth: true,
+          avatar: true,
+          googleAccount: true,
+        },
+      });
     });
 
-    if (existingUser) {
-      // Do not automatically link accounts based only on matching email.
-      throw new AppException({
-        code: 'GOOGLE_ACCOUNT_LINK_REQUIRED',
-        message:
-          'An account with this email already exists. Sign in to your existing account and connect Google from account settings.',
-      });
-    }
-
-    // 3. Create a new user and Google account atomically.
-    try {
-      const user = await this.prisma.$transaction(async (tx) => {
-        const createdUser = await tx.user.create({
-          data: {
-            email,
-            name: profile.name?.trim() || email.split('@')[0],
-            status: 'ACTIVE',
-            auth: {
-              create: {
-                passwordHash: null,
-                emailVerified: true,
-              },
-            },
-            googleAccount: {
-              create: {
-                googleId,
-                email,
-              },
-            },
-          },
-          include: {
-            auth: true,
-            avatar: true,
-            googleAccount: true,
-          },
-        });
-
-        return createdUser;
-      });
-
-      return user;
-    } catch (error) {
-      // A concurrent OAuth request may have created the same user
-      // or Google account. Recheck before deciding how to proceed.
-      const linkedAccount = await this.prisma.googleAccount.findUnique({
+    return user;
+  } catch (error) {
+    // 6. Handle concurrent Google login requests
+    const linkedAccount =
+      await this.prisma.googleAccount.findUnique({
         where: { googleId },
         include: {
           user: {
@@ -1135,32 +1147,46 @@ export class AuthService {
         },
       });
 
-      if (linkedAccount) {
-        if (linkedAccount.user.status !== 'ACTIVE') {
-          throw new AppException({
-            code: 'ACCOUNT_INACTIVE',
-            message: 'Your account is inactive.',
-          });
-        }
-
-        return linkedAccount.user;
+    // This request's uploaded image was not used by the concurrent request.
+    if (uploadedAvatar) {
+      try {
+        await this.imageService.deleteImage(uploadedAvatar.fileId);
+      } catch (cleanupError) {
+        console.error(
+          'Failed to clean up unused Google avatar:',
+          cleanupError,
+        );
       }
+    }
 
-      const userByEmail = await this.prisma.user.findUnique({
-        where: { email },
-      });
-
-      if (userByEmail) {
+    if (linkedAccount) {
+      if (linkedAccount.user.status !== 'ACTIVE') {
         throw new AppException({
-          code: 'GOOGLE_ACCOUNT_LINK_REQUIRED',
-          message:
-            'An account with this email already exists. Sign in to your existing account and connect Google from account settings.',
+          code: 'ACCOUNT_INACTIVE',
+          message: 'Your account is inactive.',
+          status: HttpStatus.FORBIDDEN,
         });
       }
 
-      throw error;
+      return linkedAccount.user;
     }
+
+    // 7. Check if another request created the email account
+    const userByEmail = await this.prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (userByEmail) {
+      throw new AppException({
+        code: 'GOOGLE_ACCOUNT_LINK_REQUIRED',
+        message: 'An account with this email already exists. Please sign in and link your Google account.',
+        status: HttpStatus.CONFLICT,
+      });
+    }
+
+    throw error;
   }
+}
 
   async changePassword(userId: string, dto: ChangePasswordDto): Promise<void> {
     const { currentPassword, newPassword, confirmPassword } = dto;
