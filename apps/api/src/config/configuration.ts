@@ -4,6 +4,7 @@ export default () => ({
     port: Number(process.env.PORT) || 4000,
     corsOrigin: process.env.CORS_ORIGIN || process.env.FRONTEND_URL,
     frontendUrl: process.env.FRONTEND_URL,
+    googleCallbackUrl: process.env.GOOGLE_CALLBACK_URL
   },
 
   database: {
