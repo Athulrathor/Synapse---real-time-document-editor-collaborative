@@ -31,7 +31,7 @@ export class OutboxDispatcherService {
   async dispatchPendingEvents(): Promise<void> {
     const events = await this.outboxRepository.claimPending(50);
 
-    this.logger.debug(`event: ${event}`,event)
+    this.logger.debug(`event: ${events}`,events)
 
     for (const event of events) {
       try {
