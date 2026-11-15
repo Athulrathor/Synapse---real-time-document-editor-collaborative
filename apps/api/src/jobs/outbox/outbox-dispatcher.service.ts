@@ -31,8 +31,6 @@ export class OutboxDispatcherService {
   async dispatchPendingEvents(): Promise<void> {
     const events = await this.outboxRepository.claimPending(50);
 
-    this.logger.debug(`event: ${events}`,events)
-
     for (const event of events) {
       try {
         const payload = event.payload as {
@@ -44,7 +42,6 @@ export class OutboxDispatcherService {
 
         switch (event.eventType) {
           case 'USER_VERIFICATION_EMAIL_REQUESTED':
-            console.log("cron started USER_VERIFICATION")
             await this.emailQueue.enqueueVerification(
               {
                 type: 'verification',
@@ -69,7 +66,6 @@ export class OutboxDispatcherService {
             break;
 
           case 'DOCUMENT_CREATED':
-            console.log("cron started DOCUMENT_CREATED")
             const documentEvent = event.payload as {
               documentId: string;
               workspaceId: string;
@@ -84,7 +80,6 @@ export class OutboxDispatcherService {
             break;
 
           case 'WORKSPACE_INVITATION_EMAIL_REQUESTED': {
-            console.log("cron started WORKSPACE_INVITATION_EMAIL_REQUESTED")
             const invitationPayload = event.payload as {
               workspaceId: string;
               workspaceName: string;
