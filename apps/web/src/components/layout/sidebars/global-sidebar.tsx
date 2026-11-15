@@ -188,7 +188,7 @@ export function GlobalSidebar() {
           <SidebarMenu className="gap-2">
             <SidebarMenuItem>
               <SidebarMenuButton asChild tooltip="Settings">
-                <Link href="/settings">
+                <Link href={`/settings/profile`}>
                   <Settings2 className="size-4" />
                   <span>Settings</span>
                 </Link>
