@@ -29,12 +29,9 @@ export class OutboxDispatcherService {
 
   @Cron('*/5 * * * * *')
   async dispatchPendingEvents(): Promise<void> {
-    
-    this.logger.log('[CRON] dispatchPendingEvents triggered');
-
     const events = await this.outboxRepository.claimPending(50);
 
-    this.logger.log(`[CRON] Claimed ${events.length} events`);
+    this.logger.debug(`event: ${event}`,event)
 
     for (const event of events) {
       try {
@@ -60,7 +57,6 @@ export class OutboxDispatcherService {
             break;
 
           case 'RESET_PASSWORD_EMAIL_REQUESTED':
-            console.log("cron started RESET_PASSWORD")
             await this.emailQueue.enqueuePasswordReset(
               {
                 type: 'password-reset',
@@ -159,8 +155,6 @@ export class OutboxDispatcherService {
 
   @Cron('*/5 * * * * *')
   async processPendingCheckpoints(): Promise<void> {
-    this.logger2.log('[CRON] dispatchPendingEvents triggered');
-
     const cutoff = new Date(Date.now() - 30_000);
 
     const pendingDocuments = await this.prisma.yjsDocumentState.findMany({
@@ -175,8 +169,6 @@ export class OutboxDispatcherService {
       take: 20,
       select: { documentId: true },
     });
-
-    this.logger2.log(`[CRON] Claimed ${pendingDocuments} events`);
 
     for (const { documentId } of pendingDocuments) {
       try {
